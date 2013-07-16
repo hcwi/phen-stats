@@ -1,7 +1,7 @@
 .Rproj.user
 .Rhistory
 .RData
-output/*
+*/output/*
 # History files
 .Rhistory
 # Example code in package build process
