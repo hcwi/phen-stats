@@ -1,3 +1,4 @@
+#Find pairs of study/assay file names in investigation file
 find.files <- function(inv) {
   
   files <- data.frame(studyName=character(0), assayName=character(0), stringsAsFactors=FALSE)
@@ -21,6 +22,7 @@ find.files <- function(inv) {
   files  
 }
 
+#Read standard investigation file in given folder
 read.inv <- function(folder=".", file="i_Investigation.txt") {
   inv = tryCatch({
     fname = paste(folder, file, sep="/")
@@ -38,6 +40,7 @@ read.inv <- function(folder=".", file="i_Investigation.txt") {
   )
 }
 
+#Find non-standard investigation file in given folder
 find.inv <- function(folder) {
   nums <- grep("^i_.*", list.files(path=folder))
   if (length(nums) == 0) {
@@ -46,9 +49,11 @@ find.inv <- function(folder) {
   if (length(nums) > 1) {
     stop(paste("More than one (", length(nums), ") investigation files were found in folder", folder))
   }
-  list.files(path=folder)[nums]
+  inv <- list.files(path=folder)[nums]
+  inv
 }
 
+#Run finding files
 load.inv <- function(dir=".") {
   inv <- read.inv(dir);
   files <<- find.files(inv)
@@ -60,6 +65,7 @@ load.inv <- function(dir=".") {
 #load.inv("isatab2")
 #load.inv("isatab3")
 
+#Run reading files # main
 run <- function() {
   
   #setwd(paste(getwd(),"isatab", sep="/"))
@@ -73,33 +79,84 @@ run <- function() {
   load.files(files[1,1], files[1,2])
 }
 
+#Load metadata for study/assay pair
 load.files <- function(sName, aName) {
+  
+  print(paste(sName, aName))
   study <<- read.table(sName, header=T)
   assay <<- read.table(aName, header=T)
   
   dupNames <- subset(names(study), match(names(study), names(assay)) > 0)
+  print(paste("Common columns: ", toString(dupNames)))
   dupNames.nontrivial <- grep("(REF)|(Accession.Number)", dupNames, invert=T)
   dupNames <- dupNames[dupNames.nontrivial]
   sa <<- merge(study, assay, by=dupNames, all=T)
+  print(paste("Merged by", dupNames))
 
-  #load.data(sa)
+  load.data(sa)
 }
 
-# load.data <- function(sa) {
-#   
-#   dataFiles <- grep("Data.File", names(sa), value=T)
-#   is.na(sa[dataFiles])
-#   
-#   
-#   apply(sa[dataFiles], is.na)
-#   
-#   for (i in 1:length(dataFiles)) {
-#     if (any(is.na(sa[dataFiles[i]])))
-#       #dataFiles[i] <- NA
-#   }
-#   
-# }
+#Load data for study/assay pair
+load.data <- function(sa) {
+  
+    dataName <<- findDataFile(sa)
+    d <- tryCatch({
+      if (grep("xls", dataName)) {
+        load.xls(paste(getwd(),dataName, sep="/"))
+      }
+      else {
+        read.table(dataName, header=T, sep="\t")
+      }
+    },    
+                      error = function(e)       
+                        print(e),
+                      warning = function(w) {
+                        print(w)
+                      },
+                      finally = function() {
+                        on.exit(close(dataName))
+                      }
+    )
+    data <<- d
+    
+}
 
+#Load data from xls file
+load.xls <- function(file) {
+  
+  if(!require("gdata")) {install.packages("gdata")}
+  library(gdata)
+  d <- read.xls(file, perl="C:/strawberry/perl/bin/perl.exe")
+  d
+}
+
+#Find name of data file to use for study/assay pair
+findDataFile <- function (sa) {
+  
+  are.files <- grep("Data.File", names(sa), value=T)
+  print(paste("Data files: ", toString(are.files)))
+  
+  have.all <- function(x) !any(is.na(x))
+  are.full <- sapply(sa[are.files], have.all)
+  
+  if (length(are.full) < 1)
+    stop("Among the columns referring to data there are no columns free of missing values")
+  
+  have.same <- function(x) length(unique(x))==1
+  are.same <- sapply(sa[are.files][are.full], have.same)
+  
+  nSame = length(are.same)
+  if ( nSame < 1)
+    stop("Among the columns referring to data there are no full columns with all same values")
+  if ( nSame > 1)
+    warning("Among the columns referring to data there are more than one full columns with all same values. The last one will be used.")
+  
+  print(paste("Full equal data names in: ", toString(are.files[are.full][are.same])))
+  dfName <- unique(sa[are.files][are.full][are.same][nSame])
+  print(paste("Using data from file: ", dfName))
+  dfName
+}
+  
 
 
 #rm(list=ls())
