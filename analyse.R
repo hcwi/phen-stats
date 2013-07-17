@@ -54,9 +54,9 @@ find.inv <- function(folder) {
 }
 
 #Run finding files
-load.inv <- function(dir=".") {
+get.files <- function(dir=".") {
   inv <- read.inv(dir);
-  files <<- find.files(inv)
+  files <- find.files(inv)
   files
 }
 
@@ -64,42 +64,43 @@ load.inv <- function(dir=".") {
 run <- function() {
   
   #setwd(paste(getwd(),"isatab", sep="/"))
-  load.inv()
+  studyAssayPairs <<- get.files()
   
 #   TODO processing and saving of each study+assay set
 #   for (i in 1:dim(files)) {
 #     load.files(files[i,1], files[i,2])
 #     ..analyse..
 #   }
-  load.files(files[1,1], files[1,2])
+  experiment <<- load.files(studyAssayPairs[1,1], studyAssayPairs[1,2])
+  
+  models <<- get.models(experiment)
 }
 
 #Load metadata for study/assay pair
 load.files <- function(sName, aName) {
   
   print(paste(sName, aName))
-  study <<- read.table(sName, header=T)
-  assay <<- read.table(aName, header=T)
+  study <- read.table(sName, header=T)
+  assay <- read.table(aName, header=T)
   
   dupNames <- subset(names(study), match(names(study), names(assay)) > 0)
   print(paste("Common columns: ", toString(dupNames)))
   dupNames.nontrivial <- grep("(REF)|(Accession.Number)", dupNames, invert=T)
   dupNames <- dupNames[dupNames.nontrivial]
-  sa <<- merge(study, assay, by=dupNames, all=T)
+  sa <- merge(study, assay, by=dupNames, all=T)
   print(paste("Merged by", dupNames))
 
-  obs <<- load.data(sa)
+  obs <- load.data(sa)
   dupNames <- subset(names(sa), match(names(sa), names(obs)) > 0)
   print(paste("Common columns: ", toString(dupNames)))
-  sad <<- merge(sa, obs, by=dupNames, all=T)
+  sad <- merge(sa, obs, by=dupNames, all=T)
   print(paste("Merged by: ", toString(dupNames)))
   
-  model.sad(sad)
-
+  sad
 }
 
 
-model.sad <- function(sad) {
+get.models <- function(sad) {
   
   if(!require("lme4")) {
     install.packages("lme4")
@@ -118,7 +119,7 @@ model.sad <- function(sad) {
   are.random <- grep("(Block)|(Field)", are.levels[are.var], value=T)
   are.fixed  <- grep("(Block)|(Field)", are.levels[are.var], value=T, invert=T)
   
-  models <<- list()
+  models <- list()
   
   analysis <- list(data=sadf, traits=are.traits, levels=are.levels, models)
   
@@ -147,9 +148,9 @@ model.sad <- function(sad) {
     
     
     l <- list(trait=trait, fixed=are.fixed, random=are.random, model=model)
-    models <<- c(models,list(l))
+    models <- c(models,list(l))
   }
-  
+  models
 
 }
 
@@ -158,7 +159,7 @@ model.sad <- function(sad) {
 #Load data for study/assay pair
 load.data <- function(sa) {
   
-    dataName <<- findDataFile(sa)
+    dataName <- findDataFile(sa)
     d <- tryCatch({
       if (grep("xls", dataName)) {
         load.xls(paste(getwd(),dataName, sep="/"))
