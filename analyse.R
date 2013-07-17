@@ -41,40 +41,71 @@ read.inv <- function(folder=".", file="i_Investigation.txt") {
 }
 
 #Find non-standard investigation file in given folder
-find.inv <- function(folder) {
-  nums <- grep("^i_.*", list.files(path=folder))
+find.inv <- function(dir) {
+  nums <- grep("^i_.*", list.files(path=dir))
   if (length(nums) == 0) {
-    stop(paste("No investigation files were found in folder", folder))
+    stop(paste("No investigation files were found in folder", dir))
   }
   if (length(nums) > 1) {
-    stop(paste("More than one (", length(nums), ") investigation files were found in folder", folder))
+    stop(paste("More than one (", length(nums), ") investigation files were found in folder", dir))
   }
-  inv <- list.files(path=folder)[nums]
+  inv <- list.files(path=dir)[nums]
   inv
 }
 
-#Run finding files
+#Run finding files - first investigation, then study/assay pairs
 get.files <- function(dir=".") {
   inv <- read.inv(dir);
   files <- find.files(inv)
   files
 }
 
-#Run reading files # main
+#Run processing: find, read, model, save
 run <- function() {
   
   #setwd(paste(getwd(),"isatab", sep="/"))
   studyAssayPairs <<- get.files()
   
-#   TODO processing and saving of each study+assay set
-#   for (i in 1:dim(files)) {
-#     load.files(files[i,1], files[i,2])
-#     ..analyse..
-#   }
-  experiment <<- load.files(studyAssayPairs[1,1], studyAssayPairs[1,2])
-  
-  models <<- get.models(experiment)
+  for (i in 1:dim(studyAssayPairs)) {
+    
+    sFile <- studyAssayPairs[i,1]
+    aFile <- studyAssayPairs[i,2]
+    
+    experiment <<- load.files(sFile, aFile)   
+    models <<- get.models(experiment)
+        
+    
+    # save results to files
+    
+    sFile2 <- substr(sFile, start=0, stop=regexpr("[.]",sFile)-1)
+    aFile2 <- substr(aFile, start=0, stop=regexpr("[.]",aFile)-1)
+    
+    rFile <- paste("output", sep="/", paste(sFile2, aFile2, "obj.R", sep="_"))
+    save(experiment, models, file=rFile)
+    print(paste("R objects saved to file:", rFile))
+    
+    statFile <- paste("output", sep="/", paste(sFile2, aFile2, "stat.txt", sep="_"))    
+    for (i in 1:length(models)) {
+      if(i==1)
+        write.table(models[[i]]$model@fixef, file=statFile)
+      else 
+        write.table(models[[i]]$model@fixef, file=statFile, append=T)
+    }
+    print(paste("Sufficient statistics saved to file: ", statFile))
+    
+    # update isa-tab file to include sufficient data file
+    update.file(aFile, statFile)   
+    print(paste("Assay file", aFile, "udpdated to include sufficient statistics column"))
+  }  
 }
+
+update.file <- function(aFile, statFile) {
+  a <- read.table(aFile, header=T, check.names=F)
+  a <- cbind(a, "Sufficient Data File"=statFile)
+  write.table(a, na="", row.names=F, sep="\t", file=paste(aFile, 2, ".txt", sep=""))
+  
+}
+
 
 #Load metadata for study/assay pair
 load.files <- function(sName, aName) {
@@ -82,6 +113,8 @@ load.files <- function(sName, aName) {
   print(paste(sName, aName))
   study <- read.table(sName, header=T)
   assay <- read.table(aName, header=T)
+  s <<- study
+  a <<- assay
   
   dupNames <- subset(names(study), match(names(study), names(assay)) > 0)
   print(paste("Common columns: ", toString(dupNames)))
@@ -91,6 +124,7 @@ load.files <- function(sName, aName) {
   print(paste("Merged by", dupNames))
 
   obs <- load.data(sa)
+  d <<- obs
   dupNames <- subset(names(sa), match(names(sa), names(obs)) > 0)
   print(paste("Common columns: ", toString(dupNames)))
   sad <- merge(sa, obs, by=dupNames, all=T)
