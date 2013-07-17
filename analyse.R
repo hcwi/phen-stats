@@ -60,11 +60,6 @@ load.inv <- function(dir=".") {
   files
 }
 
-
-#load.inv("isatab")
-#load.inv("isatab2")
-#load.inv("isatab3")
-
 #Run reading files # main
 run <- function() {
   
@@ -93,8 +88,72 @@ load.files <- function(sName, aName) {
   sa <<- merge(study, assay, by=dupNames, all=T)
   print(paste("Merged by", dupNames))
 
-  load.data(sa)
+  obs <<- load.data(sa)
+  dupNames <- subset(names(sa), match(names(sa), names(obs)) > 0)
+  print(paste("Common columns: ", toString(dupNames)))
+  sad <<- merge(sa, obs, by=dupNames, all=T)
+  print(paste("Merged by: ", toString(dupNames)))
+  
+  model.sad(sad)
+
 }
+
+
+model.sad <- function(sad) {
+  
+  if(!require("lme4")) {
+    install.packages("lme4")
+  }
+  library(lme4)
+  
+  factorize <- function(x) {if (!is.numeric(x)) factor(x) else x}
+  sadf <- lapply(sad, factorize)
+    
+  are.traits <- grep("Trait[.]Value", names(sad), value=T)
+  
+  are.levels <- grep("(Characteristics)|(Factor)", names(sad), value=T)
+  have.var <- function(x) length(unique(x))>1
+  are.var <- sapply(sad[are.levels], have.var)
+  
+  are.random <- grep("(Block)|(Field)", are.levels[are.var], value=T)
+  are.fixed  <- grep("(Block)|(Field)", are.levels[are.var], value=T, invert=T)
+  
+  models <<- list()
+  
+  analysis <- list(data=sadf, traits=are.traits, levels=are.levels, models)
+  
+  for (i in 1:length(are.traits)) {
+    
+    trait = are.traits[i]
+    
+    fixed = are.fixed[1]
+    for (j in 2:length(are.fixed)) {
+      fixed <- paste(fixed, are.fixed[j], sep="*")
+    }
+    
+    random <- are.random[1]
+    if (length(are.random) > 1) {
+      for (j in 2:length(are.random)) {
+        random <- paste(random, are.random[j], sep="*")
+      }
+    }
+    
+    form <- paste(trait,"~",fixed,"+(1|",random,")", sep="")
+    print(paste("Formula:", form))
+  
+    model <- lmer(form, sadf)
+    model.coef <- coef(model)
+    #print(model)
+    
+    
+    l <- list(trait=trait, fixed=are.fixed, random=are.random, model=model)
+    models <<- c(models,list(l))
+  }
+  
+
+}
+
+
 
 #Load data for study/assay pair
 load.data <- function(sa) {
@@ -117,8 +176,7 @@ load.data <- function(sa) {
                         on.exit(close(dataName))
                       }
     )
-    data <<- d
-    
+    d
 }
 
 #Load data from xls file
@@ -162,9 +220,6 @@ findDataFile <- function (sa) {
 #rm(list=ls())
 options(stringsAsFactors=FALSE)
 run()
-
-
-
 
 
 
