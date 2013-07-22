@@ -27,7 +27,7 @@ read.inv <- function(folder=".", file="i_Investigation.txt") {
   inv = tryCatch({
     fname = paste(folder, file, sep="/")
     read.delim(fname, header=F)
-    },    
+  },    
                  error = function(e)       
                    print(e),
                  warning = function(w) {
@@ -63,7 +63,10 @@ get.files <- function(dir=".") {
 #Run processing: find, read, model, save
 run <- function() {
   
-  #setwd(paste(getwd(),"isatab", sep="/"))
+  if (file.exists("C:/strawberry/perl/bin/perl.exe")) {
+    PERL <- "C:/strawberry/perl/bin/perl.exe"
+  }
+  
   studyAssayPairs <<- get.files()
   
   for (i in 1:dim(studyAssayPairs)) {
@@ -73,31 +76,40 @@ run <- function() {
     
     experiment <<- load.files(sFile, aFile)   
     models <<- get.models(experiment)
-        
     
-    # save results to files
+    save.results(sFile, aFile, experiment, models)
     
-    sFile2 <- substr(sFile, start=0, stop=regexpr("[.]",sFile)-1)
-    aFile2 <- substr(aFile, start=0, stop=regexpr("[.]",aFile)-1)
-    
-    rFile <- paste("output", sep="/", paste(sFile2, aFile2, "obj.R", sep="_"))
-    save(experiment, models, file=rFile)
-    print(paste("R objects saved to file:", rFile))
-    
-    statFile <- paste("output", sep="/", paste(sFile2, aFile2, "stat.txt", sep="_"))    
-    for (i in 1:length(models)) {
-      if(i==1)
-        write.table(models[[i]]$model@fixef, file=statFile)
-      else 
-        write.table(models[[i]]$model@fixef, file=statFile, append=T)
-    }
-    print(paste("Sufficient statistics saved to file: ", statFile))
-    
-    # update isa-tab file to include sufficient data file
-    update.file(aFile, statFile)   
-    print(paste("Assay file", aFile, "udpdated to include sufficient statistics column"))
-  }  
-}
+  }
+} 
+
+# save results to files
+save.results <- function (sFile, aFile, experiment, models) {
+  
+  sFile2 <- substr(sFile, start=0, stop=regexpr("[.]",sFile)-1)
+  aFile2 <- substr(aFile, start=0, stop=regexpr("[.]",aFile)-1)
+  
+  outDir <- "output"
+  if (!file.exists(outDir)) {
+    print("Creating outDir")
+    dir.create(outDir)
+  }
+  rFile <- paste(outDir, sep="/", paste(sFile2, aFile2, "obj.R", sep="_"))
+  save(experiment, models, file=rFile)
+  print(paste("R objects saved to file:", rFile))
+  
+  statFile <- paste(outDir, sep="/", paste(sFile2, aFile2, "stat.txt", sep="_"))    
+  for (i in 1:length(models)) {
+    if(i==1)
+      write.table(models[[i]]$model@fixef, file=statFile)
+    else 
+      write.table(models[[i]]$model@fixef, file=statFile, append=T)
+  }
+  print(paste("Sufficient statistics saved to file: ", statFile))
+  
+  # update isa-tab file to include sufficient data file
+  update.file(aFile, statFile)   
+  print(paste("Assay file", aFile, "udpdated to include sufficient statistics column"))
+} 
 
 update.file <- function(aFile, statFile) {
   a <- read.table(aFile, header=T, check.names=F)
@@ -122,7 +134,7 @@ load.files <- function(sName, aName) {
   dupNames <- dupNames[dupNames.nontrivial]
   sa <- merge(study, assay, by=dupNames, all=T)
   print(paste("Merged by", dupNames))
-
+  
   obs <- load.data(sa)
   d <<- obs
   dupNames <- subset(names(sa), match(names(sa), names(obs)) > 0)
@@ -143,7 +155,7 @@ get.models <- function(sad) {
   
   factorize <- function(x) {if (!is.numeric(x)) factor(x) else x}
   sadf <- lapply(sad, factorize)
-    
+  
   are.traits <- grep("Trait[.]Value", names(sad), value=T)
   
   are.levels <- grep("(Characteristics)|(Factor)", names(sad), value=T)
@@ -175,7 +187,7 @@ get.models <- function(sad) {
     
     form <- paste(trait,"~",fixed,"+(1|",random,")", sep="")
     print(paste("Formula:", form))
-  
+    
     model <- lmer(form, sadf)
     model.coef <- coef(model)
     #print(model)
@@ -185,7 +197,7 @@ get.models <- function(sad) {
     models <- c(models,list(l))
   }
   models
-
+  
 }
 
 
@@ -193,25 +205,34 @@ get.models <- function(sad) {
 #Load data for study/assay pair
 load.data <- function(sa) {
   
-    dataName <- findDataFile(sa)
-    d <- tryCatch({
-      if (grep("xls", dataName)) {
+  dataName <- findDataFile(sa)
+  d <- tryCatch({
+    if (grep("xls", dataName)) {
+      if (exists("PERL")) {
+        print(paste("Loading", dataName,"with xls"))
         load.xls(paste(getwd(),dataName, sep="/"))
       }
       else {
-        read.table(dataName, header=T, sep="\t")
+        dataName2 <- gsub("([.]xls)|([.]xlsx)", ".txt", dataName)
+        print(paste("Trying", dataName2,"with read.table"))
+        read.table(dataName2, header=T, sep="\t")    
       }
-    },    
-                      error = function(e)       
-                        print(e),
-                      warning = function(w) {
-                        print(w)
-                      },
-                      finally = function() {
-                        on.exit(close(dataName))
-                      }
-    )
-    d
+    }
+    else {
+      print(paste("Loading", dataName,"with read.table"))
+      read.table(dataName, header=T, sep="\t")
+    }
+  },    
+                error = function(e)       
+                  print(e),
+                warning = function(w) {
+                  print(w)
+                },
+                finally = function() {
+                  on.exit(close(dataName))
+                }
+  )
+  d
 }
 
 #Load data from xls file
@@ -249,10 +270,10 @@ findDataFile <- function (sa) {
   print(paste("Using data from file: ", dfName))
   dfName
 }
-  
 
+#args <- commandArgs(TRUE)
+#setwd(args[1])
 
-#rm(list=ls())
 options(stringsAsFactors=FALSE)
 run()
 
