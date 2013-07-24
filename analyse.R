@@ -112,9 +112,11 @@ save.results <- function (sFile, aFile, experiment, models) {
 } 
 
 update.file <- function(aFile, statFile) {
+  print("Updating..")
   a <- read.table(aFile, header=T, check.names=F)
   a <- cbind(a, "Sufficient Data File"=statFile)
   write.table(a, na="", row.names=F, sep="\t", file=paste(aFile, 2, ".txt", sep=""))
+  #write.table(a, na="", row.names=F, sep="\t", aFile)
   
 }
 
@@ -124,7 +126,7 @@ load.files <- function(sName, aName) {
   
   print(paste(sName, aName))
   study <- read.table(sName, header=T)
-  assay <- read.table(aName, header=T)
+  assay <- read.table(aName, header=T, fill=T, sep="\t")
   s <<- study
   a <<- assay
   
@@ -247,9 +249,9 @@ load.xls <- function(file) {
 #Find name of data file to use for study/assay pair
 findDataFile <- function (sa) {
   
-  are.files <- grep("Data.File", names(sa), value=T)
+  are.files <- grep("(Raw)|(Derived)|(Processed).Data.File", names(sa), value=T)
   print(paste("Data files: ", toString(are.files)))
-  
+     
   have.all <- function(x) !any(is.na(x))
   are.full <- sapply(sa[are.files], have.all)
   
