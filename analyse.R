@@ -75,42 +75,30 @@ run <- function() {
     aFile <- studyAssayPairs[i,2]
     
     experiment <<- load.files(sFile, aFile)   
-    models <<- get.models(experiment)
+    results <<- get.models(experiment)
     
-    save.results(sFile, aFile, experiment, models)
+    save.results(sFile, aFile, experiment, results)
     
   }
 } 
 
 # save results to files
-save.results <- function (sFile, aFile, experiment, models) {
+save.results <- function (sFile, aFile, experiment, results) {
   
   sFile2 <- substr(sFile, start=0, stop=regexpr("[.]",sFile)-1)
   aFile2 <- substr(aFile, start=0, stop=regexpr("[.]",aFile)-1)
   
-#   outDir <- "output"
-#   if (!file.exists(outDir)) {
-#     print("Creating outDir")
-#     dir.create(outDir)
-#   }
-#   rFile <- paste(outDir, sep="/", paste(sFile2, aFile2, "obj.R", sep="_"))
   rFile <- paste(sFile2, aFile2, "obj.R", sep="_")
-  save(experiment, models, file=rFile)
+  save(experiment, file=rFile)
   print(paste("R objects saved to file:", rFile))
   
-#   statFile <- paste(outDir, sep="/", paste(sFile2, aFile2, "stat.txt", sep="_"))    
   statFile <- paste(sFile2, aFile2, "stat.txt", sep="_")
-  for (i in 1:length(models)) {
-    if(i==1)
-      write.table(models[[i]]$model@fixef, file=statFile)
-    else 
-      write.table(models[[i]]$model@fixef, file=statFile, append=T)
-  }
+  write.table(results, file=statFile)
   print(paste("Sufficient statistics saved to file: ", statFile))
   
   # update isa-tab file to include sufficient data file
   update.file(aFile, statFile)   
-  print(paste("Assay file", aFile, "udpdated to include sufficient statistics column"))
+  print(paste("Assay file", aFile, "updated to include sufficient statistics column"))
 } 
 
 update.file <- function(aFile, statFile) {
@@ -157,38 +145,64 @@ get.models <- function(sad) {
   }
   library(lme4)
   
-  
   effects <- prepareEffects(sad)
+  traits <- effects$traits
   random <- effects$random
   fixed <- effects$fixed
-  x.full.u <- effects$x
-  x.list <- effects$x.list
   
   factorize <- function(x) {if (!is.numeric(x)) factor(x) else x}
   sadf <- lapply(sad, factorize)
   
+  results <- matrix(nrow=dim(effects$x)[2], ncol=0)
+  
   models <- list()
-  for (i in 1:length(are.traits)) {
+  for (i in 1:length(traits)) {
     
-    trait = are.traits[i] 
+    trait = traits[i] 
+    print(paste("Models for a new trait:", trait))
+    
+    result <- matrix(ncol=2, nrow=0)
+    colnames(result) <- c(paste(trait,"mean",sep=""), paste(trait,"s.e.", sep=""))
     
     form <- paste(trait,"~",fixed,"+(1|",random,")", sep="")
     print(paste("Formula:", form))
     
     model <- lmer(form, sadf)
     model.coef <- coef(model)
-
     
+    x <- unique(model@X)
+    est <- x %*% model@fixef
     
-    l <- list(trait=trait, fixed=fixed, random=random, model=model)
-    models <- c(models,list(l))
+    est.cov <- x %*% vcov(model) %*% t(x)
+    
+    for (j in 1:length(effects$x.list)) {
+      factor <- effects$x.list[[j]]$factor
+      from <- effects$x.list[[j]]$from
+      to <- effects$x.list[[j]]$to
+      
+      xf <- effects$x[,from:to]
+      
+      m <- solve(t(xf) %*% xf) %*% t(xf)
+      means <- m %*% est
+      rownames(means) <- colnames(effects$x)[from:to]
+      
+      means.var <- diag(m %*% est.cov %*% t(m))
+      
+      result <- rbind(result, cbind(means, sqrt(means.var)))
+      
+    }  
+    
+    #l <- list(trait=trait, fixed=fixed, random=random, model=model)
+    #models <- c(models,list(l))
+    results <- cbind(results, result)
   }
   
-  models
+  results
+  #models
 }
 
 
-prepareEffects <- function (sadf) {
+prepareEffects <- function (sad) {
   
   factorize <- function(x) {if (!is.numeric(x)) factor(x) else x}
   sadf <- lapply(sad, factorize)
@@ -227,34 +241,38 @@ prepareEffects <- function (sadf) {
   # vector 1
   x.list <- list()
   x.full <- matrix(1, nrow=dim(sad)[1])
+  colnames(x.full) <- "all"
   l.to <- 1
-  x.list <- c(x.list, list(list(from=1, to=l.to)))
-  
+  x.list <- c(x.list, list(list(factor="const", from=1, to=l.to)))
   # single trait vectors
   for (j in 1:length(are.fixed)) {
     
     f <- paste(are.traits[1],"~",are.fixed[j],"+(1|",random,")-1", sep="")
     print(paste("  Tmp model formula:", f))
-    m <- lmer(f, sadf)@X
+    mod <- lmer(f, sadf)
+    m <- mod@X
+    colnames(m) <- names(mod@fixef)
     x.full <- cbind(x.full, m)
     l.from <- l.to + 1
     l.to <- l.to + dim(m)[2]
-    x.list <- c(x.list, list(list(trait=are.fixed[j], from=l.from, to=l.to)))   
+    x.list <- c(x.list, list(list(factor=are.fixed[j], from=l.from, to=l.to)))   
   }  
   
   # all traits combination vector
   f <- paste(are.traits[1],"~",fixed.noconst,"+(1|",random,")-1", sep="")
   print(paste("  Tmp model formula:", f))
-  m <- lmer(f, sadf)@X
+  mod <- lmer(f, sadf)
+  m <- mod@X
+  colnames(m) <- names(mod@fixef)
   x.full <- cbind(x.full, m)
   l.from <- l.to + 1
   l.to <- l.to + dim(m)[2]
-  x.list <- c(x.list, list(list(trait=fixed.noconst, from=l.from, to=l.to)))
+  x.list <- c(x.list, list(list(factor=fixed.noconst, from=l.from, to=l.to)))
   
   
   x.full.unique <- unique(x.full)
   
-  list(random=random, fixed=fixed, x=x.full.unique, x.list=x.list)
+  list(traits=are.traits, random=random, fixed=fixed, x=x.full.unique, x.list=x.list)
 }
 
 
@@ -306,7 +324,7 @@ findDataFile <- function (sa) {
   
   are.files <- grep("(Raw)|(Derived)|(Processed).Data.File", names(sa), value=T)
   print(paste("Data files: ", toString(are.files)))
-     
+  
   have.all <- function(x) !any(is.na(x))
   are.full <- sapply(sa[are.files], have.all)
   
