@@ -157,6 +157,39 @@ get.models <- function(sad) {
   }
   library(lme4)
   
+  
+  effects <- prepareEffects(sad)
+  random <- effects$random
+  fixed <- effects$fixed
+  x.full.u <- effects$x
+  x.list <- effects$x.list
+  
+  factorize <- function(x) {if (!is.numeric(x)) factor(x) else x}
+  sadf <- lapply(sad, factorize)
+  
+  models <- list()
+  for (i in 1:length(are.traits)) {
+    
+    trait = are.traits[i] 
+    
+    form <- paste(trait,"~",fixed,"+(1|",random,")", sep="")
+    print(paste("Formula:", form))
+    
+    model <- lmer(form, sadf)
+    model.coef <- coef(model)
+
+    
+    
+    l <- list(trait=trait, fixed=fixed, random=random, model=model)
+    models <- c(models,list(l))
+  }
+  
+  models
+}
+
+
+prepareEffects <- function (sadf) {
+  
   factorize <- function(x) {if (!is.numeric(x)) factor(x) else x}
   sadf <- lapply(sad, factorize)
   
@@ -169,39 +202,59 @@ get.models <- function(sad) {
   are.random <- grep("(Block)|(Field)", are.levels[are.var], value=T)
   are.fixed  <- grep("(Block)|(Field)", are.levels[are.var], value=T, invert=T)
   
-  models <- list()
+  #analysis <- list(data=sadf, traits=are.traits, levels=are.levels, models)
   
-  analysis <- list(data=sadf, traits=are.traits, levels=are.levels, models)
-  
-  for (i in 1:length(are.traits)) {
-    
-    trait = are.traits[i]
-    
-    fixed = are.fixed[1]
-    for (j in 2:length(are.fixed)) {
-      fixed <- paste(fixed, are.fixed[j], sep="*")
+  random <- are.random[1]
+  if (length(are.random) > 1) {
+    for (j in 2:length(are.random)) {
+      random <- paste(random, are.random[j], sep="*")
     }
-    
-    random <- are.random[1]
-    if (length(are.random) > 1) {
-      for (j in 2:length(are.random)) {
-        random <- paste(random, are.random[j], sep="*")
-      }
-    }
-    
-    form <- paste(trait,"~",fixed,"+(1|",random,")", sep="")
-    print(paste("Formula:", form))
-    
-    model <- lmer(form, sadf)
-    model.coef <- coef(model)
-    #print(model)
-    
-    
-    l <- list(trait=trait, fixed=are.fixed, random=are.random, model=model)
-    models <- c(models,list(l))
   }
-  models
   
+  fixed = are.fixed[1]
+  fixed.noconst = are.fixed[1]
+  if (length(are.fixed) > 1) {
+    for (j in 2:length(are.fixed)) {
+      fixed <- paste(fixed, are.fixed[j], sep="*")  
+      fixed.noconst <- paste(fixed.noconst, are.fixed[j], sep=":")  
+    }
+  }
+  
+  
+  # generation of full model matrices for fixed effects
+  print("Generation of full model matrices for fixed effects")
+  
+  # vector 1
+  x.list <- list()
+  x.full <- matrix(1, nrow=dim(sad)[1])
+  l.to <- 1
+  x.list <- c(x.list, list(list(from=1, to=l.to)))
+  
+  # single trait vectors
+  for (j in 1:length(are.fixed)) {
+    
+    f <- paste(are.traits[1],"~",are.fixed[j],"+(1|",random,")-1", sep="")
+    print(paste("  Tmp model formula:", f))
+    m <- lmer(f, sadf)@X
+    x.full <- cbind(x.full, m)
+    l.from <- l.to + 1
+    l.to <- l.to + dim(m)[2]
+    x.list <- c(x.list, list(list(trait=are.fixed[j], from=l.from, to=l.to)))   
+  }  
+  
+  # all traits combination vector
+  f <- paste(are.traits[1],"~",fixed.noconst,"+(1|",random,")-1", sep="")
+  print(paste("  Tmp model formula:", f))
+  m <- lmer(f, sadf)@X
+  x.full <- cbind(x.full, m)
+  l.from <- l.to + 1
+  l.to <- l.to + dim(m)[2]
+  x.list <- c(x.list, list(list(trait=fixed.noconst, from=l.from, to=l.to)))
+  
+  
+  x.full.unique <- unique(x.full)
+  
+  list(random=random, fixed=fixed, x=x.full.unique, x.list=x.list)
 }
 
 
