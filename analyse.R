@@ -1,6 +1,8 @@
 #Find pairs of study/assay file names in investigation file
 find.files <- function(inv) {
   
+  print("[debug] find.files")
+  
   files <- data.frame(studyName=character(0), assayName=character(0), stringsAsFactors=FALSE)
   
   inv.studies <- as.matrix(subset(inv, V1=="Study File Name")) 
@@ -24,6 +26,9 @@ find.files <- function(inv) {
 
 #Read standard investigation file in given folder
 read.inv <- function(folder=".", file="i_Investigation.txt") {
+  
+  print("[debug] read.inv")
+  
   inv = tryCatch({
     fname = paste(folder, file, sep="/")
     read.delim(fname, header=F)
@@ -42,6 +47,9 @@ read.inv <- function(folder=".", file="i_Investigation.txt") {
 
 #Find non-standard investigation file in given folder
 find.inv <- function(dir) {
+  
+  print("[debug] find.inv")
+  
   nums <- grep("^i_.*", list.files(path=dir))
   if (length(nums) == 0) {
     stop(paste("No investigation files were found in folder", dir))
@@ -55,6 +63,9 @@ find.inv <- function(dir) {
 
 #Run finding files - first investigation, then study/assay pairs
 get.files <- function(dir=".") {
+  
+  print("[debug] get.files")
+  
   inv <- read.inv(dir);
   files <- find.files(inv)
   files
@@ -62,6 +73,8 @@ get.files <- function(dir=".") {
 
 #Run processing: find, read, model, save
 run <- function() {
+  
+  print("[debug] run")
   
   if (file.exists("C:/strawberry/perl/bin/perl.exe")) {
     PERL <- "C:/strawberry/perl/bin/perl.exe"
@@ -85,6 +98,8 @@ run <- function() {
 # save results to files
 save.results <- function (sFile, aFile, experiment, results) {
   
+  print("[debug] save.results")
+  
   sFile2 <- substr(sFile, start=0, stop=regexpr("[.]",sFile)-1)
   aFile2 <- substr(aFile, start=0, stop=regexpr("[.]",aFile)-1)
   
@@ -102,6 +117,9 @@ save.results <- function (sFile, aFile, experiment, results) {
 } 
 
 update.file <- function(aFile, statFile) {
+  
+  print("[debug] update.file")
+  
   print("Updating..")
   a <- read.table(aFile, header=T, check.names=F, sep="\t")
   a <- cbind(a, "Sufficient Data File"=statFile)
@@ -114,9 +132,13 @@ update.file <- function(aFile, statFile) {
 #Load metadata for study/assay pair
 load.files <- function(sName, aName) {
   
+  print("[debug] load.files")
+  
   print(paste(sName, aName))
-  study <- read.table(sName, header=T)
-  assay <- read.table(aName, header=T, fill=T, sep="\t")
+  study <- read.table(sName, header=T, sep='\t')
+  print("[debug]     read.table study")
+  assay <- read.table(aName, header=T, sep='\t', fill=T)
+  print("[debug]     read.table assay")
   s <<- study
   a <<- assay
   
@@ -140,18 +162,30 @@ load.files <- function(sName, aName) {
 
 get.models <- function(sad) {
   
+  print("[debug] get.models")
+  
   if(!require("lme4")) {
     install.packages("lme4")
   }
   library(lme4)
   
-  effects <- prepareEffects(sad)
+  effects <- prepare.effects(sad)
   traits <- effects$traits
   random <- effects$random
   fixed <- effects$fixed
   
-  factorize <- function(x) {if (!is.numeric(x)) factor(x) else x}
-  sadf <- lapply(sad, factorize)
+#   factorize <- function(x) {if (!is.numeric(x)) factor(x) else x}
+#   sadf <- lapply(sad, factorize)
+  
+  factorizenames <- function(x) {
+    if (is.numeric(sad[,x]) && 
+          length(grep("Trait[.]Value", names(sad)[x])) > 0) 
+      sad[,x] 
+    else factor(sad[,x])
+  }
+  sadf <- lapply(seq_along(sad), factorizenames)
+  names(sadf) <- names(sad)
+  
   
   results <- matrix(nrow=dim(effects$x)[2], ncol=0)
   
@@ -168,7 +202,7 @@ get.models <- function(sad) {
     print(paste("Formula:", form))
     
     model <- lmer(form, sadf)
-    model.coef <- coef(model)
+    #model.coef <- coef(model)
     
     x <- unique(model@X)
     est <- x %*% model@fixef
@@ -202,7 +236,9 @@ get.models <- function(sad) {
 }
 
 
-prepareEffects <- function (sad) {
+prepare.effects <- function (sad) {
+  
+  print("[debug] prepare.effects")
   
   factorize <- function(x) {if (!is.numeric(x)) factor(x) else x}
   sadf <- lapply(sad, factorize)
@@ -213,8 +249,8 @@ prepareEffects <- function (sad) {
   have.var <- function(x) length(unique(x))>1
   are.var <- sapply(sad[are.levels], have.var)
   
-  are.random <- grep("(Block)|(Field)", are.levels[are.var], value=T)
-  are.fixed  <- grep("(Block)|(Field)", are.levels[are.var], value=T, invert=T)
+  are.random <- grep("(Block)|(Field)|(Rank)|(Plot)", are.levels[are.var], value=T)
+  are.fixed  <- grep("(Block)|(Field)|(Rank)|(Plot)", are.levels[are.var], value=T, invert=T)
   
   #analysis <- list(data=sadf, traits=are.traits, levels=are.levels, models)
   
@@ -229,8 +265,13 @@ prepareEffects <- function (sad) {
   fixed.noconst = are.fixed[1]
   if (length(are.fixed) > 1) {
     for (j in 2:length(are.fixed)) {
-      fixed <- paste(fixed, are.fixed[j], sep="*")  
-      fixed.noconst <- paste(fixed.noconst, are.fixed[j], sep=":")  
+      #if (j>2) {
+      #  print(" -------- More than 2 fixed effects! System is not preapred to deal with multiple fixed factors which usually lead to  not positive definite matrices. Only 2 first factors will be used -------- ")
+      #} else 
+      {
+        fixed <- paste(fixed, are.fixed[j], sep="*")  
+        fixed.noconst <- paste(fixed.noconst, are.fixed[j], sep=":")  
+      }
     }
   }
   
@@ -269,7 +310,6 @@ prepareEffects <- function (sad) {
   l.to <- l.to + dim(m)[2]
   x.list <- c(x.list, list(list(factor=fixed.noconst, from=l.from, to=l.to)))
   
-  
   x.full.unique <- unique(x.full)
   
   list(traits=are.traits, random=random, fixed=fixed, x=x.full.unique, x.list=x.list)
@@ -279,6 +319,8 @@ prepareEffects <- function (sad) {
 
 #Load data for study/assay pair
 load.data <- function(sa) {
+  
+  print("[debug] load.data")
   
   dataName <- findDataFile(sa)
   d <- tryCatch({
@@ -313,6 +355,8 @@ load.data <- function(sa) {
 #Load data from xls file
 load.xls <- function(file) {
   
+  print("[debug] load.xls")
+  
   if(!require("gdata")) {install.packages("gdata")}
   library(gdata)
   d <- read.xls(file, perl="C:/strawberry/perl/bin/perl.exe")
@@ -321,6 +365,8 @@ load.xls <- function(file) {
 
 #Find name of data file to use for study/assay pair
 findDataFile <- function (sa) {
+  
+  print("[debug] findDataFile")
   
   are.files <- grep("(Raw)|(Derived)|(Processed).Data.File", names(sa), value=T)
   print(paste("Data files: ", toString(are.files)))
@@ -356,88 +402,6 @@ run()
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-analyse <- function (path) {
-  
-  setwd(path)
-  print(path)
-  #TODO return errors when libraries are missing (they do not install on their own unless cran mirror is chosen)
-  barley <- load.data()
-  model <- model.data(barley)
-  means <- calculate.means(barley)
-  save(barley, model, means, file="output/savedObjects.R")
-  fname = "output/stats.txt"
-  write.table(model@fixef, file=fname)
-  fname
-}
-
-load.data <- function () {
-  
-  #LOADING DATA
-  s <- read.table("s_Study1.txt", header=T)
-  a <- read.table("a_study1_phenotyping.txt", header=T)
-  
-  if(!require("gdata")) {install.packages("gdata")}
-  library(gdata)
-  
-  # d <- read.xls("a_study1_processed_data.xlsx", perl="C:/strawberry/perl/bin/perl.exe")
-  # alternative to gdata (which requires perl) is transformation to txt file:
-  d <- read.table("a_study1_processed_data.txt", header=T, sep="\t")
-  
-  sa <- merge(s,a, by="Source.Name", all=T)
-  sad <- merge(sa, d, by="Sample.Name", all=T)
-  
-  sad$Term.Accession.Number <- factor(sad$Term.Accession.Number)
-  sad$Term.Accession.Number.1 <- factor(sad$Term.Accession.Number.1)
-  sad$Term.Accession.Number.2 <- factor(sad$Term.Accession.Number.2)
-  sad$Term.Accession.Number.3 <- factor(sad$Term.Accession.Number.3)
-  sad$Term.Accession.Number.y <- factor(sad$Term.Accession.Number.y)
-  sad$Term.Source.REF.3 <- factor(sad$Term.Source.REF.3)
-  sad$Term.Source.REF.y <- factor(sad$Term.Source.REF.y)
-  sad$Factor.Value.Block. <- factor(sad$Factor.Value.Block.)
-  sad$Raw.Data.File <- factor(sad$Raw.Data.File)
-  
-  sad$Trait.value.Stem.diameter. <- levels(sad$Trait.value.Stem.diameter.)[as.integer(sad$Trait.value.Stem.diameter.)]
-  
-  barley.full <- sad
-  barley <- barley.full[c(1,2,6,14,17,24,25,28)]
-  names(barley) <- c("sample", "source", "infraname", "f.treatment", "f.block", "t.length", "t.colour", "t.stemDiameter")
-  
-  barley
-}
-
-model.data <- function(barley) {
-  
-  #CONSTRUCTING MODEL
-  
-  if(!require("lme4")) {
-    install.packages("lme4")
-  }
-  library(lme4)
-  model <- lmer(t.length~infraname*f.treatment+(1|f.block), barley)
-  #model.coef <- coef(model)
-  
-  model
-}
-
 calculate.means <- function(barley) {
   
   #UGLY: CALCULATIING MEANS BY HAND
@@ -466,18 +430,6 @@ calculate.means <- function(barley) {
   results
 }
 
-#CLEANUP
-#rm("a", "s", "d", "sa", "sad", "i", "j", "what", "byWhat", "seChar", "sdChar", "vChar", "mChar")
-#ls()
-
-#RESULTS
-#results
-#model
-#model.coef
-
-
-#ADDITIONAL 
-
 #P-VALS
 #if(!require("languageR")) {install.packages("languageR")}
 #library(languageR)
@@ -486,10 +438,3 @@ calculate.means <- function(barley) {
 #NULL MODEL COMPARISION
 #m1.null <- lmer(t.length~1+(1|f.block), barley)
 #anova(m1,m1.null)
-
-#write(c(1:10),file='/output/stats.txt')
-#f <- paste(args[1], '/output/stats.txt', sep='')
-#write(c(1:10),file=f)
-
-#args <- commandArgs(TRUE)
-#analyse(args[1])
