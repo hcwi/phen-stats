@@ -76,9 +76,8 @@ run <- function() {
   
   print("[debug] run")
   
-  if (file.exists("C:/strawberry/perl/bin/perl.exe")) {
-    PERL <- "C:/strawberry/perl/bin/perl.exe"
-  }
+  if (file.exists("C:/strawberry/perl/bin/perl.exe")) 
+    PERL <<- "C:/strawberry/perl/bin/perl.exe"
   
   studyAssayPairs <<- get.files()
   
@@ -108,7 +107,7 @@ save.results <- function (sFile, aFile, experiment, results) {
   print(paste("R objects saved to file:", rFile))
   
   statFile <- paste(sFile2, aFile2, "stat.txt", sep="_")
-  write.table(results, file=statFile)
+  write.table(results, file=statFile, sep="\t")
   print(paste("Sufficient statistics saved to file: ", statFile))
   
   # update isa-tab file to include sufficient data file
@@ -146,14 +145,15 @@ load.files <- function(sName, aName) {
   print(paste("Common columns: ", toString(dupNames)))
   dupNames.nontrivial <- grep("(REF)|(Accession.Number)", dupNames, invert=T)
   dupNames <- dupNames[dupNames.nontrivial]
-  sa <- merge(study, assay, by=dupNames, all=T)
+  warning("Parameter 'all' in merging changed to FALSE -- rows not matching study/assay will be removed. Rethink!")
+  sa <<- merge(study, assay, by=dupNames, all=F)
   print(paste("Merged by", dupNames))
   
   obs <- load.data(sa)
   d <<- obs
   dupNames <- subset(names(sa), match(names(sa), names(obs)) > 0)
   print(paste("Common columns: ", toString(dupNames)))
-  sad <- merge(sa, obs, by=dupNames, all=T)
+  sad <<- merge(sa, obs, by=dupNames, all=T)
   print(paste("Merged by: ", toString(dupNames)))
   
   sad
@@ -168,14 +168,19 @@ get.models <- function(sad) {
     install.packages("lme4")
   }
   library(lme4)
+  if(!require("reshape")) {
+    install.packages("reshape")
+  }
+  library(reshape)
+  
   
   effects <- prepare.effects(sad)
   traits <- effects$traits
   random <- effects$random
   fixed <- effects$fixed
   
-#   factorize <- function(x) {if (!is.numeric(x)) factor(x) else x}
-#   sadf <- lapply(sad, factorize)
+  #   factorize <- function(x) {if (!is.numeric(x)) factor(x) else x}
+  #   sadf <- lapply(sad, factorize)
   
   factorizenames <- function(x) {
     if (is.numeric(sad[,x]) && 
@@ -245,21 +250,34 @@ prepare.effects <- function (sad) {
   
   are.traits <- grep("Trait[.]Value", names(sad), value=T)
   
-  are.levels <- grep("(Characteristics)|(Factor)", names(sad), value=T)
+  warning("Removing traits with no variation")
   have.var <- function(x) length(unique(x))>1
+  are.var <- sapply(sad[are.traits], have.var)
+  are.traits <- are.traits[are.var]
+  
+  are.levels <- grep("((Characteristics)|(Factor))", names(sad), value=T)
+  
+  # Only for Keygene data testing
+  warning("Filtering factors to exclude *id* names -- only for Keygene data. Remove for other analyses!")
+  are.levels <- grep("[Ii]d", are.levels, value=T, invert=T)
+  
   are.var <- sapply(sad[are.levels], have.var)
   
-  are.random <- grep("(Block)|(Field)|(Rank)|(Plot)", are.levels[are.var], value=T)
-  are.fixed  <- grep("(Block)|(Field)|(Rank)|(Plot)", are.levels[are.var], value=T, invert=T)
+  are.random <- grep("(Block)|(Field)|(Rank)|(Plot)|(Replic)", are.levels[are.var], value=T)
+  are.fixed  <- grep("(Block)|(Field)|(Rank)|(Plot)|(Replic)", are.levels[are.var], value=T, invert=T)
   
-  #analysis <- list(data=sadf, traits=are.traits, levels=are.levels, models)
-  
-  random <- are.random[1]
-  if (length(are.random) > 1) {
-    for (j in 2:length(are.random)) {
-      random <- paste(random, are.random[j], sep="*")
+  if (length(are.random) > 0) {
+    random <- are.random[1]
+    if (length(are.random) > 1) {
+      for (j in 2:length(are.random)) {
+        random <- paste(random, are.random[j], sep="*")
+      }
     }
   }
+  else {
+    random <- grep("Source.Name", names(sad), value=T)
+  }
+  print(paste("[debug]      random: ", random, sep=""))
   
   fixed = are.fixed[1]
   fixed.noconst = are.fixed[1]
@@ -268,49 +286,55 @@ prepare.effects <- function (sad) {
       #if (j>2) {
       #  print(" -------- More than 2 fixed effects! System is not preapred to deal with multiple fixed factors which usually lead to  not positive definite matrices. Only 2 first factors will be used -------- ")
       #} else 
-      {
-        fixed <- paste(fixed, are.fixed[j], sep="*")  
-        fixed.noconst <- paste(fixed.noconst, are.fixed[j], sep=":")  
-      }
+{
+  fixed <- paste(fixed, are.fixed[j], sep="*")  
+  fixed.noconst <- paste(fixed.noconst, are.fixed[j], sep=":")  
+}
     }
+  }
+  print(paste("[debug]      fixed: ", fixed, sep=""))
+  
+  # pivot
+  
+  names <- vector()
+  for (i in 1:length(are.fixed)) {
+    
+    com <- combn(are.fixed, i)
+    for (j in 1:dim(com)[2]) {
+      name <- com[1,j]
+      if (dim(com)[1] > 1) {
+        for (k in 2:dim(com)[1]) {
+          name <- paste(name, com[k,j], sep="*")
+        }
+      }
+      names <- rbind(names, name)
+    }
+    
   }
   
   
-  # generation of full model matrices for fixed effects
-  print("Generation of full model matrices for fixed effects")
-  
-  # vector 1
   x.list <- list()
   x.full <- matrix(1, nrow=dim(sad)[1])
   colnames(x.full) <- "all"
   l.to <- 1
   x.list <- c(x.list, list(list(factor="const", from=1, to=l.to)))
-  # single trait vectors
-  for (j in 1:length(are.fixed)) {
+  
+  for (i in 1:length(names)) {
     
-    f <- paste(are.traits[1],"~",are.fixed[j],"+(1|",random,")-1", sep="")
-    print(paste("  Tmp model formula:", f))
-    mod <- lmer(f, sadf)
-    m <- mod@X
-    colnames(m) <- names(mod@fixef)
-    x.full <- cbind(x.full, m)
+    formula <- paste("Sample.Name", sep="~", names[i])
+    print(paste("[debug]           names: ", names[i], sep=""))
+    print(paste("[debug]           formu: ", formula, sep=""))
+    
+    x <- cast(sad, formula, length)
+    x <- x[-1]
+    
+    x.full <- cbind(x.full, x)
     l.from <- l.to + 1
-    l.to <- l.to + dim(m)[2]
-    x.list <- c(x.list, list(list(factor=are.fixed[j], from=l.from, to=l.to)))   
-  }  
+    l.to <- l.to + dim(x)[2]
+    x.list <- c(x.list, list(list(factor=names[i], from=l.from, to=l.to)))   
+  }
   
-  # all traits combination vector
-  f <- paste(are.traits[1],"~",fixed.noconst,"+(1|",random,")-1", sep="")
-  print(paste("  Tmp model formula:", f))
-  mod <- lmer(f, sadf)
-  m <- mod@X
-  colnames(m) <- names(mod@fixef)
-  x.full <- cbind(x.full, m)
-  l.from <- l.to + 1
-  l.to <- l.to + dim(m)[2]
-  x.list <- c(x.list, list(list(factor=fixed.noconst, from=l.from, to=l.to)))
-  
-  x.full.unique <- unique(x.full)
+  x.full.unique <- as.matrix(unique(x.full))  
   
   list(traits=are.traits, random=random, fixed=fixed, x=x.full.unique, x.list=x.list)
 }
@@ -380,7 +404,7 @@ findDataFile <- function (sa) {
   have.same <- function(x) length(unique(x))==1
   are.same <- sapply(sa[are.files][are.full], have.same)
   
-  nSame = length(are.same)
+  nSame = length(sa[are.files][are.full][are.same])
   if ( nSame < 1)
     stop("Among the columns referring to data there are no full columns with all same values")
   if ( nSame > 1)
