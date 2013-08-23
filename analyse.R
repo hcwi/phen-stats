@@ -103,11 +103,18 @@ save.results <- function (sFile, aFile, experiment, results) {
   aFile2 <- substr(aFile, start=0, stop=regexpr("[.]",aFile)-1)
   
   rFile <- paste(sFile2, aFile2, "obj.R", sep="_")
+  
+  
   save(experiment, file=rFile)
   print(paste("R objects saved to file:", rFile))
   
+  a <- read.table(aFile, header=T, check.names=F, sep="\t")
+  names <- names(a)
+  print(names)
+  
   statFile <- paste(sFile2, aFile2, "stat.txt", sep="_")
-  write.table(results, file=statFile, sep="\t")
+  warning("Results rounded to 2 decimals")
+  write.table(round(results,2), file=statFile, sep="\t")
   print(paste("Sufficient statistics saved to file: ", statFile))
   
   # update isa-tab file to include sufficient data file
@@ -201,7 +208,7 @@ get.models <- function(sad) {
     print(paste("Models for a new trait:", trait))
     
     result <- matrix(ncol=2, nrow=0)
-    colnames(result) <- c(paste(trait,"mean",sep=""), paste(trait,"s.e.", sep=""))
+    colnames(result) <- c(paste(d.names[trait],"Mean"), paste(d.names[trait],"s.e."))
     
     form <- paste(trait,"~",fixed,"+(1|",random,")", sep="")
     print(paste("Formula:", form))
@@ -263,8 +270,8 @@ prepare.effects <- function (sad) {
   
   are.var <- sapply(sad[are.levels], have.var)
   
-  are.random <- grep("(Block)|(Field)|(Rank)|(Plot)|(Replic)", are.levels[are.var], value=T)
-  are.fixed  <- grep("(Block)|(Field)|(Rank)|(Plot)|(Replic)", are.levels[are.var], value=T, invert=T)
+  are.random <- grep("(Block)|(Field)|(Rank)|(Plot)|(Replic)|(Column)|(Row)", are.levels[are.var], value=T)
+  are.fixed  <- grep("(Block)|(Field)|(Rank)|(Plot)|(Replic)|(Column)|(Row)", are.levels[are.var], value=T, invert=T)
   
   if (length(are.random) > 0) {
     random <- are.random[1]
@@ -356,7 +363,11 @@ load.data <- function(sa) {
       else {
         dataName2 <- gsub("([.]xls)|([.]xlsx)", ".txt", dataName)
         print(paste("Trying", dataName2,"with read.table"))
-        read.table(dataName2, header=T, sep="\t")    
+        d1 <- read.table(dataName2, header=T, sep="\t")    
+        d2 <- read.table(dataName2, header=T, sep="\t", check.names=F)    
+        d.names <<- as.vector(names(d2))
+        names(d.names) <<- names(d1)
+        d1
       }
     }
     else {
@@ -383,8 +394,11 @@ load.xls <- function(file) {
   
   if(!require("gdata")) {install.packages("gdata")}
   library(gdata)
-  d <- read.xls(file, perl="C:/strawberry/perl/bin/perl.exe")
-  d
+  d1 <- read.xls(file, perl="C:/strawberry/perl/bin/perl.exe")
+  d2 <- read.xls(file, perl="C:/strawberry/perl/bin/perl.exe", check.names=F)
+  d.names <<- as.vector(names(d2))
+  names(d.names) <<- names(d1)
+  d1
 }
 
 #Find name of data file to use for study/assay pair
