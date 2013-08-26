@@ -81,13 +81,21 @@ run <- function() {
   
   studyAssayPairs <<- get.files()
   
-  for (i in 1:dim(studyAssayPairs)) {
+  for (i in 1:dim(studyAssayPairs)[1]) {
     
     sFile <- studyAssayPairs[i,1]
-    aFile <- studyAssayPairs[i,2]
+    aFile <- studyAssayPairs[i,2]  
+    sa <- load.files(sFile, aFile)
     
-    experiment <<- load.files(sFile, aFile)   
-    results <<- get.models(experiment)
+    dFile <- find.dFile(sa)
+    studyAssayPairs[i,3] <<- dFile
+    dat <- load.data(dFile)
+    d <- dat[[1]]
+    d.names <- dat[[2]]
+    
+    experiment <<- get.experiment(sa, d)
+    
+    results <<- get.models(experiment, d.names)
     
     save.results(sFile, aFile, experiment, results)
     
@@ -153,21 +161,27 @@ load.files <- function(sName, aName) {
   dupNames.nontrivial <- grep("(REF)|(Accession.Number)", dupNames, invert=T)
   dupNames <- dupNames[dupNames.nontrivial]
   warning("Parameter 'all' in merging changed to FALSE -- rows not matching study/assay will be removed. Rethink!")
-  sa <<- merge(study, assay, by=dupNames, all=F)
+  sa <- merge(study, assay, by=dupNames, all=F)
   print(paste("Merged by", dupNames))
   
-  obs <- load.data(sa)
-  d <<- obs
-  dupNames <- subset(names(sa), match(names(sa), names(obs)) > 0)
+  sa  
+}
+
+
+get.experiment <- function(sa, d) {
+  
+  print("[debug] get.experiment")
+  
+  dupNames <- subset(names(sa), match(names(sa), names(d)) > 0)
   print(paste("Common columns: ", toString(dupNames)))
-  sad <<- merge(sa, obs, by=dupNames, all=T)
+  sad <- merge(sa, d, by=dupNames, all=T)
   print(paste("Merged by: ", toString(dupNames)))
   
   sad
 }
 
 
-get.models <- function(sad) {
+get.models <- function(sad, d.names) {
   
   print("[debug] get.models")
   
@@ -349,26 +363,19 @@ prepare.effects <- function (sad) {
 
 
 #Load data for study/assay pair
-load.data <- function(sa) {
+load.data <- function(dFile) {
   
   print("[debug] load.data")
+  print(paste("Loading", dFile))
   
-  dataName <- findDataFile(sa)
+  f <- paste(getwd(),dFile, sep="/")
+  
   d <- tryCatch({
-    if (grep("xls", dataName)) {
-      if (exists("PERL")) {
-        print(paste("Loading", dataName,"with xls"))
-        load.xls(paste(getwd(),dataName, sep="/"))
-      }
-      else {
-        dataName2 <- gsub("([.]xls)|([.]xlsx)", ".txt", dataName)
-        print(paste("Trying", dataName2,"with read.table"))
-        d1 <- read.table(dataName2, header=T, sep="\t")    
-        d2 <- read.table(dataName2, header=T, sep="\t", check.names=F)    
-        d.names <<- as.vector(names(d2))
-        names(d.names) <<- names(d1)
-        d1
-      }
+    if (grep("xls", dFile)) {
+      if (exists("PERL"))
+        load.xls(f)
+      else
+        load.txt(f)
     }
     else {
       print(paste("Loading", dataName,"with read.table"))
@@ -394,15 +401,30 @@ load.xls <- function(file) {
   
   if(!require("gdata")) {install.packages("gdata")}
   library(gdata)
-  d1 <- read.xls(file, perl="C:/strawberry/perl/bin/perl.exe")
+  d <- read.xls(file, perl="C:/strawberry/perl/bin/perl.exe")
   d2 <- read.xls(file, perl="C:/strawberry/perl/bin/perl.exe", check.names=F)
-  d.names <<- as.vector(names(d2))
-  names(d.names) <<- names(d1)
-  d1
+  d.names <- as.vector(names(d2))
+  names(d.names) <- names(d)
+  list(d, d.names)
 }
 
+#Load data from txt file
+load.txt <- function(file) {
+  
+  print("[debug] load.txt")
+  
+  dataName2 <- gsub("([.]xls)|([.]xlsx)", ".txt", dataName)
+  print(paste("Trying", dataName2,"with read.table"))
+  d <- read.table(dataName2, header=T, sep="\t")    
+  d2 <- read.table(dataName2, header=T, sep="\t", check.names=F)    
+  d.names <- as.vector(names(d2))
+  names(d.names) <- names(d)
+  list(d, d.names)
+}
+
+
 #Find name of data file to use for study/assay pair
-findDataFile <- function (sa) {
+find.dFile <- function (sa) {
   
   print("[debug] findDataFile")
   
