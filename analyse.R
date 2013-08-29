@@ -90,22 +90,25 @@ run <- function() {
     dFile <- find.dFile(sa)
     studyAssayPairs[i,3] <<- dFile
     dat <- load.data(dFile)
-    d <- dat[[1]]
-    d.names <- dat[[2]]
+    d <<- dat[[1]]
+    d.names <<- dat[[2]]
     
     experiment <<- get.experiment(sa, d)
     
-    results <<- get.models(experiment, d.names)
+    result <<- get.models(experiment, d.names)
     
-    save.results(sFile, aFile, experiment, results)
+    save.results(sFile, aFile, experiment, result)
     
   }
 } 
 
 # save results to files
-save.results <- function (sFile, aFile, experiment, results) {
+save.results <- function (sFile, aFile, experiment, res) {
   
   print("[debug] save.results")
+  
+  means <- res[[1]]
+  models <- res[[2]]
   
   sFile2 <- substr(sFile, start=0, stop=regexpr("[.]",sFile)-1)
   aFile2 <- substr(aFile, start=0, stop=regexpr("[.]",aFile)-1)
@@ -114,6 +117,7 @@ save.results <- function (sFile, aFile, experiment, results) {
   
   
   save(experiment, file=rFile)
+  save(models, file=rFile)
   print(paste("R objects saved to file:", rFile))
   
   a <- read.table(aFile, header=T, check.names=F, sep="\t")
@@ -121,8 +125,7 @@ save.results <- function (sFile, aFile, experiment, results) {
   print(names)
   
   statFile <- paste(sFile2, aFile2, "stat.txt", sep="_")
-  warning("Results rounded to 2 decimals")
-  write.table(round(results,2), file=statFile, sep="\t")
+  write.table(means, file=statFile, sep="\t", na="", row.names=F)
   print(paste("Sufficient statistics saved to file: ", statFile))
   
   # update isa-tab file to include sufficient data file
@@ -200,6 +203,8 @@ get.models <- function(sad, d.names) {
   random <- effects$random
   fixed <- effects$fixed
   
+  
+  
   #   factorize <- function(x) {if (!is.numeric(x)) factor(x) else x}
   #   sadf <- lapply(sad, factorize)
   
@@ -213,7 +218,36 @@ get.models <- function(sad, d.names) {
   names(sadf) <- names(sad)
   
   
-  results <- matrix(nrow=dim(effects$x)[2], ncol=0)
+  #factors <- strsplit(effects$x.list[[4]]$factor, "[*]")
+  c_fixed <- unlist(strsplit(fixed, "[*]"))
+  c_random <- unlist(strsplit(random, "[*]"))
+  c_est <- paste("", unlist(strsplit(traits, "[*]")), sep="")
+  c_se <- paste("S.e.", unlist(strsplit(traits, "[*]")), sep="")
+  c_traits <- c(rbind(c_est,c_se))
+  c_type <- "Parameter"
+  cols <- c(c_type, c_fixed, c_random, c_traits)
+  
+  results <- matrix(nrow=dim(effects$x)[2], ncol=length(cols))
+  colnames(results) <- cols
+  
+  results[,c_type] <- "Mean"
+  
+  
+  for (j in 1:length(effects$x.list)) {
+    
+    factors <- strsplit(effects$x.list[[j]]$factor, "[*]")[[1]]
+    from <- effects$x.list[[j]]$from
+    to <- effects$x.list[[j]]$to
+    
+    if (factors[1] != "const") {
+      for (i in from:to) {
+        col <- strsplit(colnames(effects$x)[i], "_")[[1]]
+        for (k in 1:length(col)) {
+          results[i,factors[k]] <- col[k]
+        }
+      }
+    }
+  }
   
   models <- list()
   for (i in 1:length(traits)) {
@@ -221,14 +255,10 @@ get.models <- function(sad, d.names) {
     trait = traits[i] 
     print(paste("Models for a new trait:", trait))
     
-    result <- matrix(ncol=2, nrow=0)
-    colnames(result) <- c(paste(d.names[trait],"Mean"), paste(d.names[trait],"s.e."))
-    
     form <- paste(trait,"~",fixed,"+(1|",random,")", sep="")
     print(paste("Formula:", form))
     
     model <- lmer(form, sadf)
-    #model.coef <- coef(model)
     
     x <- unique(model@X)
     est <- x %*% model@fixef
@@ -248,17 +278,17 @@ get.models <- function(sad, d.names) {
       
       means.var <- diag(m %*% est.cov %*% t(m))
       
-      result <- rbind(result, cbind(means, sqrt(means.var)))
+      results[from:to, trait] <- means
+      results[from:to, paste("S.e.",trait, sep="")] <- sqrt(means.var)
+      
       
     }  
     
-    #l <- list(trait=trait, fixed=fixed, random=random, model=model)
-    #models <- c(models,list(l))
-    results <- cbind(results, result)
+    l <- list(trait=trait, fixed=fixed, random=random, model=model)
+    models <- c(models,list(l))
   }
   
-  results
-  #models
+  list(results, models)
 }
 
 
@@ -401,8 +431,8 @@ load.xls <- function(file) {
   
   if(!require("gdata")) {install.packages("gdata")}
   library(gdata)
-  d <- read.xls(file, perl="C:/strawberry/perl/bin/perl.exe")
-  d2 <- read.xls(file, perl="C:/strawberry/perl/bin/perl.exe", check.names=F)
+  d <- read.xls(file, perl=PERL)
+  d2 <- read.xls(file, perl=PERL, check.names=F)
   d.names <- as.vector(names(d2))
   names(d.names) <- names(d)
   list(d, d.names)
@@ -452,43 +482,31 @@ find.dFile <- function (sa) {
   dfName
 }
 
-#args <- commandArgs(TRUE)
-#setwd(args[1])
+
+
+# Things to do before running in Java
+
+# remove global variables (<<-)
+# change assay file instead of adding "*2.txt"
+
+# uncomment:
+# args <- commandArgs(TRUE)
+# setwd(args[1])
 
 options(stringsAsFactors=FALSE)
 run()
 
+#setwd("C:/Users/hcwi/Desktop/phen-stats/isatab")
+#setwd("C:/Users/hcwi/Desktop/phen/src/test/resources/DataWUR")
+#setwd("C:/Users/hcwi/Desktop/phen/src/test/resources/Phenotyping2")
+#setwd("C:/Users/hcwi/Desktop/phen/src/test/resources/IPGPASData")
+#setwd()
 
-
-
-
-calculate.means <- function(barley) {
-  
-  #UGLY: CALCULATIING MEANS BY HAND
-  
-  #select factors and phenotype by hand:
-  #what <- "t.stemDiameter"
-  #byWhat <- c("infraname", "f.block")
-  
-  #calculate means for all obs~factor combinations
-  what <- names(barley[sapply(barley, is.numeric)])
-  byWhat <- names(barley[sapply(barley, is.factor)])
-  
-  results <- list()
-  for (j in 1:length(what)) {
-    results[what[j]] <- mean(barley[,what[j]])
-    for (i in 1:length(byWhat)) {
-      mChar <- aggregate(barley[,what[j]]~barley[,byWhat[i]], FUN=mean)
-      sdChar <- aggregate(barley[,what[j]]~barley[,byWhat[i]], FUN=sd)
-      seChar <- aggregate(barley[,what[j]]~barley[,byWhat[i]], FUN=function(x) sd(x)/sqrt(length(x)))
-      vChar <- cbind(mChar,sdChar[2],seChar[2])
-      names(vChar) <- c(byWhat[i], paste(what[j], "mean", sep="."), paste(what[j],"sd", sep="."))
-      results[[paste(what[j],byWhat[i],sep="~")]] <- vChar
-    }
-  }
-  
-  results
-}
+# calculate means for all obs~factor combinations
+#   what <- names(barley[sapply(barley, is.numeric)])
+#   byWhat <- names(barley[sapply(barley, is.factor)])
+#   mChar <- aggregate(barley[,what[j]]~barley[,byWhat[i]], FUN=mean)
+# 
 
 #P-VALS
 #if(!require("languageR")) {install.packages("languageR")}
