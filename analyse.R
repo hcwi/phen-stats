@@ -85,7 +85,9 @@ run <- function() {
     
     sFile <- studyAssayPairs[i,1]
     aFile <- studyAssayPairs[i,2]  
-    sa <- load.files(sFile, aFile)
+    tmp <- load.files(sFile, aFile)
+    sa <- tmp[[1]]
+    sa.names <<- tmp[[2]]
     
     dFile <- find.dFile(sa)
     studyAssayPairs[i,3] <<- dFile
@@ -93,22 +95,58 @@ run <- function() {
     d <<- dat[[1]]
     d.names <<- dat[[2]]
     
+    sad.names <<- c(sa.names, d.names)
+    
     experiment <<- get.experiment(sa, d)
     
-    result <<- get.models(experiment, d.names)
+    result <<- get.models(experiment)
+    means <- result[[1]]
+    models <- result[[2]]
     
-    save.results(sFile, aFile, experiment, result)
+    means <- change.names(means, sad.names)
+    
+    save.results(sFile, aFile, experiment, means, models)
     
   }
 } 
 
+
+change.names <- function (means, names) {
+  
+  old.names <- colnames(means)
+  old.names <- gsub("S[.]e[.]", "", old.names)
+  names[old.names]
+  
+  
+  chnames <- function(x) {
+    if (!is.na(names[x])) {
+      if(length(grep("Trait Value", names[x])) == 0) {
+        names[x][1]
+      }
+      else {
+        gsub("Trait Value", "Estimate", names[x][1])
+      }
+    }
+    else {
+      x
+    }
+  }
+  new.names <- sapply(old.names, chnames)
+  
+  for (i in 2:length(new.names)) {
+    if (new.names[i] == new.names[i-1]) {
+      new.names[i] <- gsub("Estimate", "Standard Error", new.names[i])
+    }
+  }
+  
+  colnames(means) <- new.names
+  means
+}
+
 # save results to files
-save.results <- function (sFile, aFile, experiment, res) {
+save.results <- function (sFile, aFile, experiment, means, models) {
   
   print("[debug] save.results")
-  
-  means <- res[[1]]
-  models <- res[[2]]
   
   sFile2 <- substr(sFile, start=0, stop=regexpr("[.]",sFile)-1)
   aFile2 <- substr(aFile, start=0, stop=regexpr("[.]",aFile)-1)
@@ -153,11 +191,19 @@ load.files <- function(sName, aName) {
   
   print(paste(sName, aName))
   study <- read.table(sName, header=T, sep='\t')
+  s.names <- as.vector(names(read.table(sName, header=T, sep="\t", check.names=F)))
+  names(s.names) <- names(study)
   print("[debug]     read.table study")
+  
   assay <- read.table(aName, header=T, sep='\t', fill=T)
+  a.names <- as.vector(names(read.table(aName, header=T, sep='\t', fill=T, check.names=F)))
+  names(a.names) <- names(assay)
   print("[debug]     read.table assay")
+  
   s <<- study
-  a <<- assay
+  a <<- assay  
+  sa.names <- c(s.names, a.names)
+  
   
   dupNames <- subset(names(study), match(names(study), names(assay)) > 0)
   print(paste("Common columns: ", toString(dupNames)))
@@ -167,7 +213,7 @@ load.files <- function(sName, aName) {
   sa <- merge(study, assay, by=dupNames, all=F)
   print(paste("Merged by", dupNames))
   
-  sa  
+  list(sa, sa.names)
 }
 
 
@@ -184,7 +230,7 @@ get.experiment <- function(sa, d) {
 }
 
 
-get.models <- function(sad, d.names) {
+get.models <- function(sad) {
   
   print("[debug] get.models")
   
@@ -227,7 +273,10 @@ get.models <- function(sad, d.names) {
   c_type <- "Parameter"
   cols <- c(c_type, c_fixed, c_random, c_traits)
   
-  results <- matrix(nrow=dim(effects$x)[2], ncol=length(cols))
+  nfix <- dim(effects$x)[2]
+  nran <- length(c_random)
+  
+  results <- matrix(nrow=nfix+nran+1, ncol=length(cols))
   colnames(results) <- cols
   
   results[,c_type] <- "Mean"
@@ -249,6 +298,12 @@ get.models <- function(sad, d.names) {
     }
   }
   
+  for (i in 1:nran) {
+    results[nfix+i,"Parameter"] <- "Variance"
+  }
+  results[nfix+nran+1,"Parameter"] <- "Error Variance"
+  
+  
   models <- list()
   for (i in 1:length(traits)) {
     
@@ -259,6 +314,18 @@ get.models <- function(sad, d.names) {
     print(paste("Formula:", form))
     
     model <- lmer(form, sadf)
+    
+    #set variances of random effects
+    for (i in 1:nran) {
+      r <- c_random[i]
+      v <- (VarCorr(model)[[r]][1])
+      print(v)
+      results[nfix+i, trait] <-v
+      results[nfix+i, r] <- "*"
+    }
+    #set sigma
+    errvar <- attr(VarCorr(model), "sc")^2
+    results[nfix+nran+1, trait] <- errvar
     
     x <- unique(model@X)
     est <- x %*% model@fixef
