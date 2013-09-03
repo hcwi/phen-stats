@@ -158,10 +158,6 @@ save.results <- function (sFile, aFile, experiment, means, models) {
   save(models, file=rFile)
   print(paste("R objects saved to file:", rFile))
   
-  a <- read.table(aFile, header=T, check.names=F, sep="\t")
-  names <- names(a)
-  print(names)
-  
   statFile <- paste(sFile2, aFile2, "stat.txt", sep="_")
   write.table(means, file=statFile, sep="\t", na="", row.names=F)
   print(paste("Sufficient statistics saved to file: ", statFile))
@@ -223,6 +219,8 @@ get.experiment <- function(sa, d) {
   
   dupNames <- subset(names(sa), match(names(sa), names(d)) > 0)
   print(paste("Common columns: ", toString(dupNames)))
+  dupNames.nontrivial <- grep("(REF)|(Accession.Number)", dupNames, invert=T)
+  dupNames <- dupNames[dupNames.nontrivial]
   sad <- merge(sa, d, by=dupNames, all=T)
   print(paste("Merged by: ", toString(dupNames)))
   
@@ -233,38 +231,26 @@ get.experiment <- function(sa, d) {
 get.models <- function(sad) {
   
   print("[debug] get.models")
+  prepare.libs()  
   
-  if(!require("lme4")) {
-    install.packages("lme4")
+  efects <<- prepare.effects(sad)
+  traits <- efects$traits
+  random <- efects$random
+  if (random == "random") {
+    sad <- cbind(sad, "random"=sample(1:10, size=dim(sad)[1], rep=T))
   }
-  library(lme4)
-  if(!require("reshape")) {
-    install.packages("reshape")
-  }
-  library(reshape)
-  
-  
-  effects <- prepare.effects(sad)
-  traits <- effects$traits
-  random <- effects$random
-  fixed <- effects$fixed
-  
-  
-  
-  #   factorize <- function(x) {if (!is.numeric(x)) factor(x) else x}
-  #   sadf <- lapply(sad, factorize)
+  fixed <- efects$fixed
   
   factorizenames <- function(x) {
-    if (is.numeric(sad[,x]) && 
-          length(grep("Trait[.]Value", names(sad)[x])) > 0) 
+    if (is.numeric(sad[,x]) &&  
+        length(grep("Trait[.]Value", names(sad)[x])) > 0) 
       sad[,x] 
-    else factor(sad[,x])
+    else factor(sad[,x])   
   }
   sadf <- lapply(seq_along(sad), factorizenames)
   names(sadf) <- names(sad)
   
   
-  #factors <- strsplit(effects$x.list[[4]]$factor, "[*]")
   c_fixed <- unlist(strsplit(fixed, "[*]"))
   c_random <- unlist(strsplit(random, "[*]"))
   c_est <- paste("", unlist(strsplit(traits, "[*]")), sep="")
@@ -273,35 +259,19 @@ get.models <- function(sad) {
   c_type <- "Parameter"
   cols <- c(c_type, c_fixed, c_random, c_traits)
   
-  nfix <- dim(effects$x)[2]
+  nfix <- dim(efects$x)[2]
   nran <- length(c_random)
   
   results <- matrix(nrow=nfix+nran+1, ncol=length(cols))
   colnames(results) <- cols
   
-  results[,c_type] <- "Mean"
-  
-  
-  for (j in 1:length(effects$x.list)) {
-    
-    factors <- strsplit(effects$x.list[[j]]$factor, "[*]")[[1]]
-    from <- effects$x.list[[j]]$from
-    to <- effects$x.list[[j]]$to
-    
-    if (factors[1] != "const") {
-      for (i in from:to) {
-        col <- strsplit(colnames(effects$x)[i], "_")[[1]]
-        for (k in 1:length(col)) {
-          results[i,factors[k]] <- col[k]
-        }
-      }
-    }
-  }
-  
+  results[,c_type] <- "Mean"  
   for (i in 1:nran) {
     results[nfix+i,"Parameter"] <- "Variance"
   }
   results[nfix+nran+1,"Parameter"] <- "Error Variance"
+  
+  results <- fill.factors(results, efects)
   
   
   models <- list()
@@ -313,49 +283,106 @@ get.models <- function(sad) {
     form <- paste(trait,"~",fixed,"+(1|",random,")", sep="")
     print(paste("Formula:", form))
     
-    model <- lmer(form, sadf)
+    ss <- subset(sad, !is.na(sad[trait]))
+    factorizenames <- function(x) {
+      if (is.numeric(ss[,x]) && 
+            length(grep("Trait[.]Value", names(ss)[x])) > 0) 
+        ss[,x] 
+      else factor(ss[,x])
+    }
+    sadf <- lapply(seq_along(ss), FUN=factorizenames)
+    names(sadf) <- names(ss)
     
+    model <- lmer(form, sadf)
+      
     #set variances of random effects
-    for (i in 1:nran) {
-      r <- c_random[i]
-      v <- (VarCorr(model)[[r]][1])
-      print(v)
-      results[nfix+i, trait] <-v
-      results[nfix+i, r] <- "*"
+    for (j in 1:nran) {
+      r <- c_random[j]
+      v <- VarCorr(model)[[r]][1]
+      results[nfix+j, trait] <-v
+      results[nfix+j, r] <- "*"
     }
     #set sigma
     errvar <- attr(VarCorr(model), "sc")^2
     results[nfix+nran+1, trait] <- errvar
     
-    x <- unique(model@X)
-    est <- x %*% model@fixef
     
-    est.cov <- x %*% vcov(model) %*% t(x)
+    results <- fill.values.for.trait(results, model, efects, trait)
     
-    for (j in 1:length(effects$x.list)) {
-      factor <- effects$x.list[[j]]$factor
-      from <- effects$x.list[[j]]$from
-      to <- effects$x.list[[j]]$to
-      
-      xf <- effects$x[,from:to]
-      
-      m <- solve(t(xf) %*% xf) %*% t(xf)
-      means <- m %*% est
-      rownames(means) <- colnames(effects$x)[from:to]
-      
-      means.var <- diag(m %*% est.cov %*% t(m))
-      
-      results[from:to, trait] <- means
-      results[from:to, paste("S.e.",trait, sep="")] <- sqrt(means.var)
-      
-      
-    }  
     
     l <- list(trait=trait, fixed=fixed, random=random, model=model)
     models <- c(models,list(l))
   }
   
   list(results, models)
+}
+
+# install and load missing libraries
+prepare.libs <- function() {
+  
+  if(!require("lme4")) {
+    install.packages("lme4")
+  }
+  library(lme4)
+  if(!require("reshape")) {
+    install.packages("reshape")
+  }
+  library(reshape)
+}
+
+
+#calculate means and error for each factor
+fill.values.for.trait <- function(results, model, effects, trait) {
+  
+  print("[debug] fill.values.for.trait")
+  
+  x <- unique(model@X)
+  est <- x %*% model@fixef
+  
+  est.cov <- x %*% vcov(model) %*% t(x)
+  
+  for (j in 1:length(effects$x.list)) {
+    factor <- effects$x.list[[j]]$factor
+    from <- effects$x.list[[j]]$from
+    to <- effects$x.list[[j]]$to
+    
+    xf <- effects$x[,from:to]
+    
+    m <- solve(t(xf) %*% xf) %*% t(xf)
+    means <- m %*% est
+    rownames(means) <- colnames(effects$x)[from:to]
+    
+    means.var <- diag(m %*% est.cov %*% t(m))
+    
+    results[from:to, trait] <- means
+    results[from:to, paste("S.e.",trait, sep="")] <- sqrt(means.var)
+      
+  }  
+  results
+}
+
+# fill in information about factor levels
+fill.factors <- function(results, effects) {
+  
+  print("[debug] fill.factors")
+  
+  for (j in 1:length(effects$x.list)) {
+    
+    factors <- strsplit(effects$x.list[[j]]$factor, "[*]")[[1]]
+    from <- effects$x.list[[j]]$from
+    to <- effects$x.list[[j]]$to
+    
+    if (factors[1] != "const") {
+      for (i in from:to) {
+        col <- strsplit(colnames(effects$x)[i], "___")[[1]]
+        for (k in 1:length(col)) {
+          results[i,factors[k]] <- col[k]
+        }
+      }
+    }    
+  } 
+  
+  results
 }
 
 
@@ -393,7 +420,8 @@ prepare.effects <- function (sad) {
     }
   }
   else {
-    random <- grep("Source.Name", names(sad), value=T)
+    #random <- grep("Source.Name", names(sad), value=T)
+    random <- "random"
   }
   print(paste("[debug]      random: ", random, sep=""))
   
@@ -445,6 +473,12 @@ prepare.effects <- function (sad) {
     
     x <- cast(sad, formula, length)
     x <- x[-1]
+    
+    n <- as.vector(strsplit(names[i], "[*]")[[1]])
+    pst <- function(x) { y=x[1]; if (length(x)>1) for (i in 2:length(x)) {y <- paste(y, x[i], sep="___")}; y }
+    ns <- sort(apply(unique(sad[n]), 1, pst))
+    
+    names(x) <- ns
     
     x.full <- cbind(x.full, x)
     l.from <- l.to + 1
@@ -512,7 +546,7 @@ load.txt <- function(file) {
   
   dataName2 <- gsub("([.]xls)|([.]xlsx)", ".txt", dataName)
   print(paste("Trying", dataName2,"with read.table"))
-  d <- read.table(dataName2, header=T, sep="\t")    
+  d <- read.table(dataName2, header=T, sep="\t")
   d2 <- read.table(dataName2, header=T, sep="\t", check.names=F)    
   d.names <- as.vector(names(d2))
   names(d.names) <- names(d)
@@ -567,6 +601,8 @@ run()
 #setwd("C:/Users/hcwi/Desktop/phen/src/test/resources/DataWUR")
 #setwd("C:/Users/hcwi/Desktop/phen/src/test/resources/Phenotyping2")
 #setwd("C:/Users/hcwi/Desktop/phen/src/test/resources/IPGPASData")
+#setwd("C:/Users/hcwi/Desktop/phen/src/test/resources/DataIPK")
+#setwd("C:/Users/hcwi/Desktop/phen/src/test/resources/DataIPK2")
 #setwd()
 
 # calculate means for all obs~factor combinations
