@@ -99,7 +99,7 @@ run <- function() {
     
     experiment <<- get.experiment(sa, d)
     
-    result <<- get.models(experiment)
+    result <<- get.models.2(experiment)
     means <- result[[1]]
     models <- result[[2]]
     
@@ -228,6 +228,217 @@ get.experiment <- function(sa, d) {
 }
 
 
+prepare.results <- function(sad) {
+  
+  type <- "Parameter"
+  form <- "Formula"
+  random <- get.random(sad)
+  fixed <- get.fixed(sad)
+  traits <- get.traits(sad)
+  traits.se <- paste("S.e.", traits, sep="")
+  
+  cols <- c(type, form, fixed, random, c(rbind(traits, traits.se)))
+  ncols <- length(cols)
+  
+  results <- matrix(nrow=1, ncol=ncols)
+  colnames(results) <- cols
+  results
+  
+  # General mean
+  {
+    srow <- 1
+    results[srow, form] <- ""
+    results[srow, type] <- "Mean"
+  }
+  
+  # Means for fixed effects
+  {
+    srow <- 2
+    for (i in 1:length(fixed)) {
+      com <- combn(fixed, i)
+      ncom <- dim(com)[2]
+      for (j in 1:ncom) {
+        names <- com[,j]
+        dat <- unique(sad[names])
+        dat <- as.matrix(dat[order(dat[1]),])
+        
+        nrows <- dim(dat)[1]
+        if (is.null(nrows)) nrows <- length(dat)
+        results <- rbind(results, matrix(nrow=nrows, ncol=ncols))
+        
+        formula <- paste(names, collapse="*")
+        
+        to <- srow + nrows - 1
+        results[srow:to, names] <- dat
+        results[srow:to, form] <- formula
+        results[srow:to, type] <- "Mean"
+        results
+        srow <- to + 1
+      }
+    }
+  }
+  
+  # Variances of random effects
+  {
+    nrows <- length(random)
+    results <- rbind(results, matrix(nrow=nrows, ncol=ncols))
+    for (i in 1:nrows) {
+      results[srow, random[i]] <- "*"
+      results[srow, type] <- "Variance"
+      srow <- srow + 1
+    }
+  }
+  
+  # Error variance
+  {
+    results <- rbind(results, matrix(nrow=1, ncol=ncols))
+    results[srow, type] <- "Error variance"
+    srow <- srow + 1
+  }
+
+  results
+}
+
+get.models.2 <- function(sad) {
+  
+  print("[debug] get.models.2")
+  prepare.libs()  
+  
+  traits <- get.traits(sad)
+  results <- prepare.results(sad)
+  
+  models <- list()
+  for (i in 1:length(traits)) {
+    
+    trait = traits[i] 
+    print(paste("Models for a new trait:", trait))
+    
+    sadt <- sad[!is.na(sad[,trait]),]
+    
+    fixed <- get.fixed(sadt)
+    fixef <- paste(fixed, collapse="*")   
+    random <- get.random(sadt)
+    ranef <- paste("+(1|", random, ")", sep="", collapse="")
+    
+    factorizenames <- function(x) {
+      if (is.numeric(sadt[,x]) && 
+            length(grep("Trait[.]Value", names(sadt)[x])) > 0) 
+        sadt[,x] 
+      else factor(sadt[,x])
+    }
+    sadtf <- lapply(seq_along(sadt), FUN=factorizenames)
+    names(sadtf) <- names(sadt)
+    
+    form <- paste(trait,"~",fixef, ranef, sep="")
+    print(paste("Formula:", form))
+    
+    model <- lmer(form, sadtf)
+    
+    # Set variances of random effects
+    {
+      for (j in 1:length(random)) {
+        r <- random[j]
+        v <- VarCorr(model)[[r]][1]
+        
+        is.variable <- !is.na(results[,r]=="*")
+        is.variance <- results[,"Parameter"] == "Variance"
+        results[is.variable & is.variance, trait] <- v   
+      }
+    }
+         
+    # Set sigma
+    {
+      errvar <- attr(VarCorr(model), "sc")^2
+      is.errvar <- results[,"Parameter"] == "Error variance"
+      results[is.errvar, trait] <- errvar
+    }
+    
+    # Set means for fixed effects
+    {
+    results <- fill.means.for.fixed(sad, results, model, fixed, trait)
+    }
+    
+    l <- list(trait=trait, fixed=fixed, random=random, model=model)
+    models <- c(models,list(l))
+  }
+  
+  list(results, models)
+}
+
+prepare.matrices <- function(sad, fixed) {
+  
+  fix <- data.frame(mform="", pform="", from=1, to=1)
+  
+  x <- matrix(1, nrow=dim(sad)[1])
+  colnames(x) <- "all"
+  
+  f=1
+  for (i in 1:length(fixed)) {
+    com <- combn(fixed, i)
+    ncom <- dim(com)[2]
+    for (j in 1:ncom) {
+      names <- com[,j]
+      mform <- paste(names, collapse="*") 
+      pform <- paste(names, collapse=":") 
+      
+      formula <- paste("Sample.Name", sep="~", mform)
+      print(paste("[debug]           formu: ", formula, sep=""))
+      
+      xtmp <- cast(sad, formula, length)
+      xtmp <- xtmp[-1]
+      
+      x <- cbind(x, xtmp)
+      
+      from <- fix[f, "to"] + 1
+      to <- from + dim(xtmp)[2] - 1
+      f <- f + 1
+      fix[f,] <- list(mform, pform, from, to)
+    }
+  }
+  
+  xu <- as.matrix(unique(x))  
+  
+  list(fix=fix, xu=xu)
+}
+
+
+fill.means.for.fixed <- function(sad, results, model, fixed, trait) {
+  
+  tmp <- prepare.matrices(sad, fixed)
+  fix <- tmp$fix
+  xu <- tmp$xu
+  
+  
+  x <- unique(model@X)
+  est <- x %*% model@fixef
+  est.cov <- x %*% vcov(model) %*% t(x)
+  
+  for (i in 1:length(fix)) {
+    
+    factor <- fix[i,]$mform
+    from <- fix[i,]$from
+    to <- fix[i,]$to
+    
+    xf <- xu[,from:to]
+    
+    m <- solve(t(xf) %*% xf) %*% t(xf)
+    means <- m %*% est
+    rownames(means) <- colnames(xu)[from:to]
+    
+    means.var <- diag(m %*% est.cov %*% t(m))
+    
+    a <- results[,"Formula"] == factor
+    b <- results[,"Parameter"] == "Mean"
+    results[a&b, trait] <- means
+    results[a&b, paste("S.e.",trait, sep="")] <- sqrt(means.var)
+    
+  }  
+  
+  results
+}
+
+
+
 get.models <- function(sad) {
   
   print("[debug] get.models")
@@ -250,15 +461,15 @@ get.models <- function(sad) {
   sadf <- lapply(seq_along(sad), factorizenames)
   names(sadf) <- names(sad)
   
-  
+  {
   c_fixed <- unlist(strsplit(fixed, "[*]"))
   c_random <- unlist(strsplit(random, "[*]"))
   c_est <- paste("", unlist(strsplit(traits, "[*]")), sep="")
   c_se <- paste("S.e.", unlist(strsplit(traits, "[*]")), sep="")
-  c_traits <- c(rbind(c_est,c_se))
+  c_traits <- c(rbind(c_est, c_se))
   c_type <- "Parameter"
   cols <- c(c_type, c_fixed, c_random, c_traits)
-  
+   
   nfix <- dim(efects$x)[2]
   nran <- length(c_random)
   
@@ -272,7 +483,7 @@ get.models <- function(sad) {
   results[nfix+nran+1,"Parameter"] <- "Error Variance"
   
   results <- fill.factors(results, efects)
-  
+  }
   
   models <- list()
   for (i in 1:length(traits)) {
@@ -386,6 +597,42 @@ fill.factors <- function(results, effects) {
 }
 
 
+get.traits <- function(sad) {
+  
+  are.traits <- grep("Trait[.]Value", names(sad), value=T)
+  
+  warning("Removing traits with no variation")
+  have.var <- function(x) length(unique(x))>1
+  are.var <- sapply(sad[are.traits], have.var)
+  are.traits <- are.traits[are.var]
+  
+  are.traits
+}
+
+get.fixed <- function(sad) {
+  
+  are.levels <- grep("((Characteristics)|(Factor))", names(sad), value=T)
+  #warning("Filtering factors to exclude *id* names -- only for Keygene data. Remove for other analyses!")
+  are.levels <- grep("[Ii]d", are.levels, value=T, invert=T)
+  are.var <- sapply(sad[are.levels], FUN = function(x) length(unique(x))>1 )
+  are.fixed  <- grep("(Block)|(Field)|(Rank)|(Plot)|(Replic)|(Column)|(Row)", are.levels[are.var], value=T, invert=T)
+  
+  are.fixed
+}
+
+get.random <- function(sad) {
+  
+  are.levels <- grep("((Characteristics)|(Factor))", names(sad), value=T)
+  #warning("Filtering factors to exclude *id* names -- only for Keygene data. Remove for other analyses!")
+  are.levels <- grep("[Ii]d", are.levels, value=T, invert=T)
+  are.var <- sapply(sad[are.levels], FUN = function(x) length(unique(x))>1 )
+  are.random <- grep("(Block)|(Field)|(Rank)|(Plot)|(Replic)|(Column)|(Row)", are.levels[are.var], value=T)
+  
+  are.random
+}
+
+
+
 prepare.effects <- function (sad) {
   
   print("[debug] prepare.effects")
@@ -399,7 +646,7 @@ prepare.effects <- function (sad) {
   have.var <- function(x) length(unique(x))>1
   are.var <- sapply(sad[are.traits], have.var)
   are.traits <- are.traits[are.var]
-  
+   
   are.levels <- grep("((Characteristics)|(Factor))", names(sad), value=T)
   
   # Only for Keygene data testing
@@ -432,10 +679,10 @@ prepare.effects <- function (sad) {
       #if (j>2) {
       #  print(" -------- More than 2 fixed effects! System is not preapred to deal with multiple fixed factors which usually lead to  not positive definite matrices. Only 2 first factors will be used -------- ")
       #} else 
-{
-  fixed <- paste(fixed, are.fixed[j], sep="*")  
-  fixed.noconst <- paste(fixed.noconst, are.fixed[j], sep=":")  
-}
+      {
+        fixed <- paste(fixed, are.fixed[j], sep="*")  
+        fixed.noconst <- paste(fixed.noconst, are.fixed[j], sep=":")  
+      }
     }
   }
   print(paste("[debug]      fixed: ", fixed, sep=""))
