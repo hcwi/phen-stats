@@ -96,7 +96,7 @@ load.saFiles <- function(sName, aName) {
   print(paste("Common columns: ", toString(dupNames)))
   dupNames.nontrivial <- grep("(REF)|(Accession.Number)", dupNames, invert=T)
   dupNames <- dupNames[dupNames.nontrivial]
-  warning("Parameter 'all' in merging changed to FALSE -- rows not matching study/assay will be removed. Rethink!")
+  warning("Parameter all=FALSE, not paired rows will be removed")
   sa <- merge(study, assay, by=dupNames, all=F)
   print(paste("Merged by", dupNames))
   
@@ -235,6 +235,7 @@ run <- function() {
     sad.names <<- c(sa.names, d.names)
     
     sad <<- get.sad(sa, d)
+    sad <<- check.random(sad)
     
     result <<- get.models.2(sad)
     means <- result[[1]]
@@ -246,6 +247,17 @@ run <- function() {
     
   }
 } 
+
+check.random <- function(sad) {
+  
+  print("[debug] check.random")
+  
+  if (length(get.random(sad)) == 0 ) {
+    sad <- cbind(sad, Factor.Value.Random=sample(1:10, dim(sad)[1], rep=T))
+    print("      Random column added")
+  }  
+  sad
+}
 
 # Change names from R-consumable to input-like strings
 change.names <- function (means, names) {
@@ -325,13 +337,14 @@ get.models.2 <- function(sad) {
   print("[debug] get.models.2")
   prepare.libs()  
   
-  traits <- get.traits(sad)
-  results <- prepare.results(sad)
+  traits <<- get.traits(sad)
+  results <<- prepare.results(sad)
   
   models <- list()
   for (i in 1:length(traits)) {
     
     trait = traits[i] 
+    
     print(paste("Models for a new trait:", trait))
     
     sadt <- sad[!is.na(sad[,trait]),]
@@ -393,11 +406,11 @@ prepare.results <- function(sad) {
   
   type <- "Parameter"
   form <- "Formula"
-  random <- get.random(sad)
-  fixed <- get.fixed(sad)
   traits <- get.traits(sad)
   traits.se <- paste("S.e.", traits, sep="")
-  
+  fixed <- get.fixed(sad)
+  random <- get.random(sad)
+
   cols <- c(type, form, fixed, random, c(rbind(traits, traits.se)))
   ncols <- length(cols)
   
@@ -472,11 +485,12 @@ fill.means.for.fixed <- function(sad, results, model, fixed, trait) {
   est <- x %*% model@fixef
   est.cov <- x %*% vcov(model) %*% t(x)
   
-  for (i in 1:length(fix)) {
+  for (i in 1:dim(fix)[1]) {
     
     factor <- fix[i,]$mform
     from <- fix[i,]$from
     to <- fix[i,]$to
+    print(paste("      ", factor, from, to))
     
     xf <- xu[,from:to]
     m <- solve(t(xf) %*% xf) %*% t(xf)
@@ -569,7 +583,7 @@ get.fixed <- function(sad) {
   #warning("Filtering factors to exclude *id* names -- only for Keygene data. Remove for other analyses!")
   are.levels <- grep("[Ii]d", are.levels, value=T, invert=T)
   are.var <- sapply(sad[are.levels], FUN = function(x) length(unique(x))>1 )
-  are.fixed  <- grep("(Block)|(Field)|(Rank)|(Plot)|(Replic)|(Column)|(Row)", are.levels[are.var], value=T, invert=T)
+  are.fixed  <- grep("(Block)|(Field)|(Rank)|(Plot)|(Replic)|(Column)|(Row)|(Rand)", are.levels[are.var], value=T, invert=T)
   
   are.fixed
 }
@@ -583,7 +597,7 @@ get.random <- function(sad) {
   #warning("Filtering factors to exclude *id* names -- only for Keygene data. Remove for other analyses!")
   are.levels <- grep("[Ii]d", are.levels, value=T, invert=T)
   are.var <- sapply(sad[are.levels], FUN = function(x) length(unique(x))>1 )
-  are.random <- grep("(Block)|(Field)|(Rank)|(Plot)|(Replic)|(Column)|(Row)", are.levels[are.var], value=T)
+  are.random <- grep("(Block)|(Field)|(Rank)|(Plot)|(Replic)|(Column)|(Row)|(Rand)", are.levels[are.var], value=T)
   
   are.random
 }
@@ -600,9 +614,6 @@ get.models <- function(sad) {
   efects <<- prepare.effects(sad)
   traits <- efects$traits
   random <- efects$random
-  if (random == "random") {
-    sad <- cbind(sad, "random"=sample(1:10, size=dim(sad)[1], rep=T))
-  }
   fixed <- efects$fixed
   
   factorizenames <- function(x) {
@@ -858,7 +869,7 @@ run()
 #setwd("C:/Users/hcwi/Desktop/phen/src/test/resources/DataWUR")
 #setwd("C:/Users/hcwi/Desktop/phen/src/test/resources/Phenotyping2")
 #setwd("C:/Users/hcwi/Desktop/phen/src/test/resources/IPGPASData")
-#setwd("C:/Users/hcwi/Desktop/phen/src/test/resources/DataIPK")
+# XXX setwd("C:/Users/hcwi/Desktop/phen/src/test/resources/DataIPK")
 #setwd("C:/Users/hcwi/Desktop/phen/src/test/resources/DataIPK2")
 
 # calculate means for all obs~factor combinations
