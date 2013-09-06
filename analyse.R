@@ -235,7 +235,9 @@ run <- function() {
     sad.names <<- c(sa.names, d.names)
     
     sad <<- get.sad(sa, d)
-    sad <<- check.random(sad)
+    tmp <- check.random(sad, sad.names)
+    sad <<- tmp$sad
+    sad.names <- tmp$names
     
     result <<- get.models.2(sad)
     means <- result[[1]]
@@ -248,15 +250,19 @@ run <- function() {
   }
 } 
 
-check.random <- function(sad) {
+check.random <- function(sad, sad.names) {
   
   print("[debug] check.random")
   
   if (length(get.random(sad)) == 0 ) {
-    sad <- cbind(sad, Factor.Value.Random=sample(1:10, dim(sad)[1], rep=T))
+    sad <- cbind(sad, Factor.Value.Random.=sample(1:10, dim(sad)[1], rep=T))
+    l <- length(sad.names) + 1
+    sad.names[l] <- "Factor Value[Random]"
+    names(sad.names)[l] <- "Factor.Value.Random."
+    
     print("      Random column added")
   }  
-  sad
+  list(sad=sad, names=sad.names)
 }
 
 # Change names from R-consumable to input-like strings
@@ -344,17 +350,33 @@ get.models.2 <- function(sad) {
   for (i in 1:length(traits)) {
     
     trait = traits[i] 
-    tmp <- get.model.for.trait(trait, sad, results)
-    results <- tmp$results
-    l <- tmp$l
     
-    models <- c(models,list(l))
+    tmp <- tryCatch(
+      get.model.for.trait(trait, sad, results),    
+        error = function(e){
+          print(e)
+          return(NA)
+        },                 
+        warning = function(w) {
+          print(w)
+          return(tmp)
+        },
+        finally = function() {}
+    )
+    
+    if (!is.na(tmp[1])) {
+      results <- tmp$results
+      info <- tmp$info    
+      models <- c(models,list(info))
+    }
+    
   }
   
   list(results, models)
 }
 
 
+# Calculate model and statistics for a trait 
 get.model.for.trait <- function(trait, sad, results) {
  
   print(paste("Models for a new trait:", trait))
@@ -404,9 +426,9 @@ get.model.for.trait <- function(trait, sad, results) {
     results <- fill.means.for.fixed(sad, results, model, fixed, trait)
   }
   
-  l <- list(trait=trait, fixed=fixed, random=random, model=model)
+  info <- list(trait=trait, fixed=fixed, random=random, model=model)
   
-  list(results=results, l=l)
+  list(results=results, info=info)
 }
 
 
