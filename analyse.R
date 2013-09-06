@@ -344,60 +344,72 @@ get.models.2 <- function(sad) {
   for (i in 1:length(traits)) {
     
     trait = traits[i] 
+    tmp <- get.model.for.trait(trait, sad, results)
+    results <- tmp$results
+    l <- tmp$l
     
-    print(paste("Models for a new trait:", trait))
-    
-    sadt <- sad[!is.na(sad[,trait]),]
-    
-    fixed <- get.fixed(sadt)
-    fixef <- paste(fixed, collapse="*")   
-    random <- get.random(sadt)
-    ranef <- paste("+(1|", random, ")", sep="", collapse="")
-    
-    factorizenames <- function(x) {
-      if (is.numeric(sadt[,x]) && 
-            length(grep("Trait[.]Value", names(sadt)[x])) > 0) 
-        sadt[,x] 
-      else factor(sadt[,x])
-    }
-    sadtf <- lapply(seq_along(sadt), FUN=factorizenames)
-    names(sadtf) <- names(sadt)
-    
-    form <- paste(trait,"~",fixef, ranef, sep="")
-    print(paste("Formula:", form))
-    
-    model <- lmer(form, sadtf)
-    
-    # Set variances of random effects
-    {
-      for (j in 1:length(random)) {
-        r <- random[j]
-        v <- VarCorr(model)[[r]][1]
-        
-        is.variable <- !is.na(results[,r]=="*")
-        is.variance <- results[,"Parameter"] == "Variance"
-        results[is.variable & is.variance, trait] <- v   
-      }
-    }
-         
-    # Set sigma
-    {
-      errvar <- attr(VarCorr(model), "sc")^2
-      is.errvar <- results[,"Parameter"] == "Error variance"
-      results[is.errvar, trait] <- errvar
-    }
-    
-    # Set means for fixed effects
-    {
-	  results <- fill.means.for.fixed(sad, results, model, fixed, trait)
-    }
-    
-    l <- list(trait=trait, fixed=fixed, random=random, model=model)
     models <- c(models,list(l))
   }
   
   list(results, models)
 }
+
+
+get.model.for.trait <- function(trait, sad, results) {
+ 
+  print(paste("Models for a new trait:", trait))
+  
+  sadt <- sad[!is.na(sad[,trait]),]
+  
+  fixed <- get.fixed(sadt)
+  fixef <- paste(fixed, collapse="*")   
+  random <- get.random(sadt)
+  ranef <- paste("+(1|", random, ")", sep="", collapse="")
+  
+  factorizenames <- function(x) {
+    if (is.numeric(sadt[,x]) && 
+          length(grep("Trait[.]Value", names(sadt)[x])) > 0) 
+      sadt[,x] 
+    else factor(sadt[,x])
+  }
+  sadtf <- lapply(seq_along(sadt), FUN=factorizenames)
+  names(sadtf) <- names(sadt)
+  
+  form <- paste(trait,"~",fixef, ranef, sep="")
+  print(paste("Formula:", form))
+  
+  model <- lmer(form, sadtf)
+  
+  # Set variances of random effects
+  {
+    for (j in 1:length(random)) {
+      r <- random[j]
+      v <- VarCorr(model)[[r]][1]
+      
+      is.variable <- !is.na(results[,r]=="*")
+      is.variance <- results[,"Parameter"] == "Variance"
+      results[is.variable & is.variance, trait] <- v   
+    }
+  }
+  
+  # Set sigma
+  {
+    errvar <- attr(VarCorr(model), "sc")^2
+    is.errvar <- results[,"Parameter"] == "Error variance"
+    results[is.errvar, trait] <- errvar
+  }
+  
+  # Set means for fixed effects
+  {
+    results <- fill.means.for.fixed(sad, results, model, fixed, trait)
+  }
+  
+  l <- list(trait=trait, fixed=fixed, random=random, model=model)
+  
+  list(results=results, l=l)
+}
+
+
 
 # Prepare table for results (combinations of effects)
 prepare.results <- function(sad) {
