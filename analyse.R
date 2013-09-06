@@ -239,7 +239,7 @@ run <- function() {
     sad <<- tmp$sad
     sad.names <- tmp$names
     
-    result <<- get.models.2(sad)
+    result <<- get.models(sad)
     means <- result[[1]]
     models <- result[[2]]
     
@@ -338,9 +338,9 @@ update.aFile <- function(aFile, statFile) {
 
 
 # Calculate models and final statistics
-get.models.2 <- function(sad) {
+get.models <- function(sad) {
   
-  print("[debug] get.models.2")
+  print("[debug] get.models")
   prepare.libs()  
   
   traits <<- get.traits(sad)
@@ -600,10 +600,10 @@ get.traits <- function(sad) {
   
   are.traits <- grep("Trait[.]Value", names(sad), value=T)
   
-  warning("Removing traits with no variation")
-  have.var <- function(x) length(unique(x))>1
-  are.var <- sapply(sad[are.traits], have.var)
-  are.traits <- are.traits[are.var]
+#   warning("Removing traits with no variation")
+#   have.var <- function(x) length(unique(x))>1
+#   are.var <- sapply(sad[are.traits], have.var)
+#   are.traits <- are.traits[are.var]
   
   are.traits
 }
@@ -640,7 +640,7 @@ get.random <- function(sad) {
 
 
 # OLD - Calculate models and final statistics - OLD VERSION
-get.models <- function(sad) {
+get.models.0 <- function(sad) {
   
   print("[debug] get.models --------- OLD")
   prepare.libs()  
