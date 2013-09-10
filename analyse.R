@@ -29,6 +29,7 @@ read.iFile <- function(folder=".", file="i_Investigation.txt") {
   
   print("[debug] read.iFile")
   
+  iFile <- file
   inv = tryCatch({
     fname = paste(folder, file, sep="/")
     read.delim(fname, header=F)
@@ -36,13 +37,15 @@ read.iFile <- function(folder=".", file="i_Investigation.txt") {
                  error = function(e)       
                    print(e),
                  warning = function(w) {
-                   f <- find.iFile(folder)
-                   inv=read.iFile(folder, f)
+                   iFile <- find.iFile(folder)
+                   inv=read.iFile(folder, iFile)
                  },
                  finally = function() {
                    on.exit(close(fname))
                  }
   )
+  
+  list(i=inv, iFile=iFile)
 }
 
 # Find non-standard investigation file in given folder
@@ -66,9 +69,12 @@ get.isaFiles <- function(dir=".") {
   
   print("[debug] get.isaFiles")
   
-  inv <- read.iFile(dir);
-  files <- find.saFiles(inv)
-  files
+  tmp <- read.iFile(dir)
+  inv <- tmp$i
+  iFile <- tmp$iFile
+  saFiles <- find.saFiles(inv)
+  isaFiles <- cbind(iFile, saFiles)
+  isaFiles
 }
 
 # Load metadata for study/assay pair
@@ -220,14 +226,14 @@ run <- function() {
   
   for (i in 1:dim(saPairs)[1]) {
     
-    sFile <- saPairs[i,1]
-    aFile <- saPairs[i,2]  
+    sFile <- saPairs[i,2]
+    aFile <- saPairs[i,3]  
     tmp <- load.saFiles(sFile, aFile)
     sa <- tmp[[1]]
     sa.names <<- tmp[[2]]
     
     dFile <- find.dFile(sa)
-    saPairs[i,3] <<- dFile
+    saPairs[i,4] <<- dFile
     dat <- load.dFile(dFile)
     d <<- dat[[1]]
     d.names <<- dat[[2]]
@@ -245,11 +251,29 @@ run <- function() {
     
     means <- change.names(means, sad.names)
     
-    save.results(sFile, aFile, sad, means, models)
+    statFile <- save.results(sFile, aFile, sad, means, models)
+    saPairs[i,5] <<- statFile
+    # update isa-tab file to include sufficient data file
+    update.aFile(aFile, statFile)   
+    
+    dirs <- gsub(list.dirs(), pattern="./", rep="")
+    dirs <- grep(dirs, pattern="tmp[0-9]", val=T)
+    
+    files <- list.files()
+    toSave <- setdiff(files, dirs)
+    toSave <- setdiff(toSave, list.files(pattern="([.]zip)|([.]R)"))
+    toSave <- setdiff(toSave, saPairs[,3])
+    toSave2 <- paste("tmp2", sep="/", list.files("tmp2"))
+    toSave3 <- paste("tmp3", sep="/", list.files("tmp3"))
+    
+    zip(zipfile="isarchive2.zip", files=c(toSave, toSave2), flags="a -ep1", zip="rar")
+    zip(zipfile="isarchive3.zip", files=c(toSave, toSave3), flags="a -ep1", zip="rar")
+    
     
   }
 } 
 
+# Check if random effect exists - if not, add a random column
 check.random <- function(sad, sad.names) {
   
   print("[debug] check.random")
@@ -318,9 +342,7 @@ save.results <- function (sFile, aFile, experiment, means, models) {
   write.table(means, file=statFile, sep="\t", na="", row.names=F)
   print(paste("Sufficient statistics saved to file: ", statFile))
   
-  # update isa-tab file to include sufficient data file
-  update.aFile(aFile, statFile)   
-  print(paste("Assay file", aFile, "updated to include sufficient statistics column"))
+  statFile
 } 
 
 # Update assay file to include sufficient statistics column
@@ -330,10 +352,22 @@ update.aFile <- function(aFile, statFile) {
   
   print("Updating..")
   a <- read.table(aFile, header=T, check.names=F, sep="\t")
+  
+  dataCols <- grep(names(a), pattern="Data File")
+  
   a <- cbind(a, "Sufficient Data File"=statFile)
-  write.table(a, na="", row.names=F, sep="\t", file=paste(aFile, 2, ".txt", sep=""))
+  
+  d2 = "tmp2"
+  dir.create(d2)
+  write.table(a, na="", row.names=F, sep="\t", file=paste(d2, aFile, sep="/"))
   #write.table(a, na="", row.names=F, sep="\t", aFile)
   
+  d3 = "tmp3"
+  dir.create(d3)
+  a[dataCols] <- NA
+  write.table(a, na="", row.names=F, sep="\t", file=paste(d3, aFile, sep="/"))
+  
+  print(paste("Assay file", aFile, "updated to include sufficient statistics column"))
 }
 
 
@@ -524,7 +558,6 @@ fill.means.for.fixed <- function(sad, results, model, fixed, trait) {
     factor <- fix[i,]$mform
     from <- fix[i,]$from
     to <- fix[i,]$to
-    print(paste("      ", factor, from, to))
     
     xf <- xu[,from:to]
     m <- solve(t(xf) %*% xf) %*% t(xf)
@@ -900,6 +933,7 @@ options(stringsAsFactors=FALSE)
 run()
 
 #setwd("C:/Users/hcwi/Desktop/phen-stats/isatab")
+#setwd("C:/Users/hcwi/Desktop/phen-stats/isatab_missing")
 #setwd("C:/Users/hcwi/Desktop/phen/src/test/resources/DataWUR")
 #setwd("C:/Users/hcwi/Desktop/phen/src/test/resources/Phenotyping2")
 #setwd("C:/Users/hcwi/Desktop/phen/src/test/resources/IPGPASData")
