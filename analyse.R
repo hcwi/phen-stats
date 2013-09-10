@@ -254,24 +254,37 @@ run <- function() {
     statFile <- save.results(sFile, aFile, sad, means, models)
     saPairs[i,5] <<- statFile
     # update isa-tab file to include sufficient data file
-    update.aFile(aFile, statFile)   
-    
-    dirs <- gsub(list.dirs(), pattern="./", rep="")
-    dirs <- grep(dirs, pattern="tmp[0-9]", val=T)
-    
-    files <- list.files()
-    toSave <- setdiff(files, dirs)
-    toSave <- setdiff(toSave, list.files(pattern="([.]zip)|([.]R)"))
-    toSave <- setdiff(toSave, saPairs[,3])
-    toSave2 <- paste("tmp2", sep="/", list.files("tmp2"))
-    toSave3 <- paste("tmp3", sep="/", list.files("tmp3"))
-    
-    zip(zipfile="isarchive2.zip", files=c(toSave, toSave2), flags="a -ep1", zip="rar")
-    zip(zipfile="isarchive3.zip", files=c(toSave, toSave3), flags="a -ep1", zip="rar")
-    
+    remFiles <- update.aFile(aFile, statFile)   
+    zip.files(remFiles)
     
   }
 } 
+
+
+# Zip files to full/reduced archives
+zip.files <- function(remFiles) {
+  
+  print("[debug] zip.files")
+  print(paste("        files to remove from archive3:", remFiles))
+  
+  dirs <- gsub(list.dirs(), pattern="./", rep="")
+  dirs <- grep(dirs, pattern="tmp[0-9]", val=T)
+  
+  files <- list.files()
+  toSave <- setdiff(files, dirs)
+  toSave <- setdiff(toSave, list.files(pattern="([.]zip)|([.]R)"))
+  toSave <- setdiff(toSave, saPairs[,3])
+  
+  toSave2 <- paste("tmp2", sep="/", list.files("tmp2"))
+  zip(zipfile="isarchive2.zip", files=c(toSave, toSave2), flags="a -ep1", zip="rar")
+  
+  toSave <- setdiff(toSave, remFiles)
+  toSave3 <- paste("tmp3", sep="/", list.files("tmp3"))
+  zip(zipfile="isarchive3.zip", files=c(toSave, toSave3), flags="a -ep1", zip="rar")
+  
+}
+
+
 
 # Check if random effect exists - if not, add a random column
 check.random <- function(sad, sad.names) {
@@ -364,10 +377,17 @@ update.aFile <- function(aFile, statFile) {
   
   d3 = "tmp3"
   dir.create(d3)
+  u <- matrix(nrow=0, ncol=1)
+  for (i in dataCols)
+    u <- rbind(u, c(unique(a[i])))
+  remFiles <- u[!is.na(u)][[1]]
+  
   a[dataCols] <- NA
   write.table(a, na="", row.names=F, sep="\t", file=paste(d3, aFile, sep="/"))
   
   print(paste("Assay file", aFile, "updated to include sufficient statistics column"))
+  
+  remFiles
 }
 
 
