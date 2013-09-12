@@ -55,10 +55,10 @@ find.iFile <- function(dir) {
   
   nums <- grep("^i_.*", list.files(path=dir))
   if (length(nums) == 0) {
-    stop(paste("No investigation files were found in folder", dir))
+    stop(paste("ERROR: No investigation files were found in folder", dir))
   }
   if (length(nums) > 1) {
-    stop(paste("More than one (", length(nums), ") investigation files were found in folder", dir))
+    stop(paste("ERROR: More than one (", length(nums), ") investigation files were found in folder", dir))
   }
   inv <- list.files(path=dir)[nums]
   inv
@@ -125,14 +125,15 @@ load.dFile <- function(dFile) {
         load.txt(f)
     }
     else {
-      print(paste("Loading", dataName,"with read.table"))
-      read.table(dataName, header=T, sep="\t")
+      print(paste("Loading", dFile, "with read.table"))
+      read.table(dFile, header=T, sep="\t")
     }
   },    
-                error = function(e)       
-                  print(e),
+                error = function(e) {
+                  write(paste("ERROR: Loading data from file", dFile, "failed. The following error occured: ", e), stderr())
+                },
                 warning = function(w) {
-                  print(w)
+                  write(paste("WARNING: Loading data from file", dFile, "produced a following warning: ", e), stderr())
                 },
                 finally = function() {
                   on.exit(close(dataName))
@@ -181,16 +182,16 @@ find.dFile <- function (sa) {
   are.full <- sapply(sa[are.files], have.all)
   
   if (length(are.full) < 1)
-    stop("Among the columns referring to data there are no columns free of missing values")
+    stop("ERROR: Among the columns referring to data there are no columns free of missing values")
   
   have.same <- function(x) length(unique(x))==1
   are.same <- sapply(sa[are.files][are.full], have.same)
   
   nSame = length(sa[are.files][are.full][are.same])
   if ( nSame < 1)
-    stop("Among the columns referring to data there are no full columns with all same values")
+    stop("ERROR: Among the columns referring to data there are no full columns with all same values")
   if ( nSame > 1)
-    warning("Among the columns referring to data there are more than one full columns with all same values. The last one will be used.")
+    warning("WARNING: Among the columns referring to data there are more than one full columns with all same values. The last one will be used.")
   
   print(paste("Full equal data names in: ", toString(are.files[are.full][are.same])))
   dfName <- unique(sa[are.files][are.full][are.same][nSame])
@@ -230,13 +231,13 @@ run <- function() {
     aFile <- saPairs[i,3]  
     tmp <- load.saFiles(sFile, aFile)
     sa <- tmp[[1]]
-    sa.names <<- tmp[[2]]
+    sa.names <- tmp[[2]]
     
     dFile <- find.dFile(sa)
     saPairs[i,4] <<- dFile
     dat <- load.dFile(dFile)
     d <<- dat[[1]]
-    d.names <<- dat[[2]]
+    d.names <- dat[[2]]
     
     sad.names <<- c(sa.names, d.names)
     
@@ -245,9 +246,9 @@ run <- function() {
     sad <<- tmp$sad
     sad.names <- tmp$names
     
-    result <<- get.models(sad)
-    means <- result[[1]]
-    models <- result[[2]]
+    result <<- get.models(sad, sad.names)
+    means <- result$means
+    models <- result$models
     
     means <- change.names(means, sad.names)
     
@@ -375,14 +376,22 @@ update.aFile <- function(aFile, statFile) {
   write.table(a, na="", row.names=F, sep="\t", file=paste(d2, aFile, sep="/"))
   #write.table(a, na="", row.names=F, sep="\t", aFile)
   
+  u <- vector()
+  from=1
+  for (i in dataCols) {
+    c <- unique(a[i])
+    print(c)
+    to <- from + dim(c)[1]
+    u[from:(to-1)] <- as.matrix(c)
+    from <- to
+  }
+  u <- unique(u)
+
+  remFiles <- u[!is.na(u)]
+  a[dataCols] <- NA
+  
   d3 = "tmp3"
   dir.create(d3)
-  u <- matrix(nrow=0, ncol=1)
-  for (i in dataCols)
-    u <- rbind(u, c(unique(a[i])))
-  remFiles <- u[!is.na(u)][[1]]
-  
-  a[dataCols] <- NA
   write.table(a, na="", row.names=F, sep="\t", file=paste(d3, aFile, sep="/"))
   
   print(paste("Assay file", aFile, "updated to include sufficient statistics column"))
@@ -392,7 +401,7 @@ update.aFile <- function(aFile, statFile) {
 
 
 # Calculate models and final statistics
-get.models <- function(sad) {
+get.models <- function(sad, sad.names) {
   
   print("[debug] get.models")
   prepare.libs()  
@@ -408,11 +417,11 @@ get.models <- function(sad) {
     tmp <- tryCatch(
       get.model.for.trait(trait, sad, results),    
         error = function(e){
-          print(e)
+          write(paste("ERROR: Evaluating of model for trait '", sad.names[trait], "' failed. The following error occured: ", e, sep=""), stderr())
           return(NA)
         },                 
         warning = function(w) {
-          print(w)
+          write(paste("WARNING: Evaluating of model for trait '", sad.names[trait], "' produced the following warning: ", w, sep=""), stderr())
           return(tmp)
         },
         finally = function() {}
@@ -426,7 +435,7 @@ get.models <- function(sad) {
     
   }
   
-  list(results, models)
+  list(means=results, models=models)
 }
 
 
@@ -687,256 +696,6 @@ get.random <- function(sad) {
   are.random <- grep("(Block)|(Field)|(Rank)|(Plot)|(Replic)|(Column)|(Row)|(Rand)", are.levels[are.var], value=T)
   
   are.random
-}
-
-
-
-
-# OLD - Calculate models and final statistics - OLD VERSION
-get.models.0 <- function(sad) {
-  
-  print("[debug] get.models --------- OLD")
-  prepare.libs()  
-  
-  efects <<- prepare.effects(sad)
-  traits <- efects$traits
-  random <- efects$random
-  fixed <- efects$fixed
-  
-  factorizenames <- function(x) {
-    if (is.numeric(sad[,x]) &&  
-        length(grep("Trait[.]Value", names(sad)[x])) > 0) 
-      sad[,x] 
-    else factor(sad[,x])   
-  }
-  sadf <- lapply(seq_along(sad), factorizenames)
-  names(sadf) <- names(sad)
-  
-  {
-  c_fixed <- unlist(strsplit(fixed, "[*]"))
-  c_random <- unlist(strsplit(random, "[*]"))
-  c_est <- paste("", unlist(strsplit(traits, "[*]")), sep="")
-  c_se <- paste("S.e.", unlist(strsplit(traits, "[*]")), sep="")
-  c_traits <- c(rbind(c_est, c_se))
-  c_type <- "Parameter"
-  cols <- c(c_type, c_fixed, c_random, c_traits)
-   
-  nfix <- dim(efects$x)[2]
-  nran <- length(c_random)
-  
-  results <- matrix(nrow=nfix+nran+1, ncol=length(cols))
-  colnames(results) <- cols
-  
-  results[,c_type] <- "Mean"  
-  for (i in 1:nran) {
-    results[nfix+i,"Parameter"] <- "Variance"
-  }
-  results[nfix+nran+1,"Parameter"] <- "Error Variance"
-  
-  results <- fill.factors(results, efects)
-  }
-  
-  models <- list()
-  for (i in 1:length(traits)) {
-    
-    trait = traits[i] 
-    print(paste("Models for a new trait:", trait))
-    
-    form <- paste(trait,"~",fixed,"+(1|",random,")", sep="")
-    print(paste("Formula:", form))
-    
-    ss <- subset(sad, !is.na(sad[trait]))
-    factorizenames <- function(x) {
-      if (is.numeric(ss[,x]) && 
-            length(grep("Trait[.]Value", names(ss)[x])) > 0) 
-        ss[,x] 
-      else factor(ss[,x])
-    }
-    sadf <- lapply(seq_along(ss), FUN=factorizenames)
-    names(sadf) <- names(ss)
-    
-    model <- lmer(form, sadf)
-      
-    #set variances of random effects
-    for (j in 1:nran) {
-      r <- c_random[j]
-      v <- VarCorr(model)[[r]][1]
-      results[nfix+j, trait] <-v
-      results[nfix+j, r] <- "*"
-    }
-    #set sigma
-    errvar <- attr(VarCorr(model), "sc")^2
-    results[nfix+nran+1, trait] <- errvar
-    
-    
-    results <- fill.values.for.trait(results, model, efects, trait)
-    
-    
-    l <- list(trait=trait, fixed=fixed, random=random, model=model)
-    models <- c(models,list(l))
-  }
-  
-  list(results, models)
-}
-
-# OLD - Prepare traits and effects, and their matrices - OLD VERSION
-prepare.effects <- function (sad) {
-  
-  print("[debug] prepare.effects")
-  
-  factorize <- function(x) {if (!is.numeric(x)) factor(x) else x}
-  sadf <- lapply(sad, factorize)
-  
-  are.traits <- grep("Trait[.]Value", names(sad), value=T)
-  
-  warning("Removing traits with no variation")
-  have.var <- function(x) length(unique(x))>1
-  are.var <- sapply(sad[are.traits], have.var)
-  are.traits <- are.traits[are.var]
-   
-  are.levels <- grep("((Characteristics)|(Factor))", names(sad), value=T)
-  
-  # Only for Keygene data testing
-  warning("Filtering factors to exclude *id* names -- only for Keygene data. Remove for other analyses!")
-  are.levels <- grep("[Ii]d", are.levels, value=T, invert=T)
-  
-  are.var <- sapply(sad[are.levels], have.var)
-  
-  are.random <- grep("(Block)|(Field)|(Rank)|(Plot)|(Replic)|(Column)|(Row)", are.levels[are.var], value=T)
-  are.fixed  <- grep("(Block)|(Field)|(Rank)|(Plot)|(Replic)|(Column)|(Row)", are.levels[are.var], value=T, invert=T)
-  
-  if (length(are.random) > 0) {
-    random <- are.random[1]
-    if (length(are.random) > 1) {
-      for (j in 2:length(are.random)) {
-        random <- paste(random, are.random[j], sep="*")
-      }
-    }
-  }
-  else {
-    #random <- grep("Source.Name", names(sad), value=T)
-    random <- "random"
-  }
-  print(paste("[debug]      random: ", random, sep=""))
-  
-  fixed = are.fixed[1]
-  fixed.noconst = are.fixed[1]
-  if (length(are.fixed) > 1) {
-    for (j in 2:length(are.fixed)) {
-      #if (j>2) {
-      #  print(" -------- More than 2 fixed effects! System is not preapred to deal with multiple fixed factors which usually lead to  not positive definite matrices. Only 2 first factors will be used -------- ")
-      #} else 
-      {
-        fixed <- paste(fixed, are.fixed[j], sep="*")  
-        fixed.noconst <- paste(fixed.noconst, are.fixed[j], sep=":")  
-      }
-    }
-  }
-  print(paste("[debug]      fixed: ", fixed, sep=""))
-  
-  # pivot
-  
-  names <- vector()
-  for (i in 1:length(are.fixed)) {
-    
-    com <- combn(are.fixed, i)
-    for (j in 1:dim(com)[2]) {
-      name <- com[1,j]
-      if (dim(com)[1] > 1) {
-        for (k in 2:dim(com)[1]) {
-          name <- paste(name, com[k,j], sep="*")
-        }
-      }
-      names <- rbind(names, name)
-    }
-    
-  }
-  
-  
-  x.list <- list()
-  x.full <- matrix(1, nrow=dim(sad)[1])
-  colnames(x.full) <- "all"
-  l.to <- 1
-  x.list <- c(x.list, list(list(factor="const", from=1, to=l.to)))
-  
-  for (i in 1:length(names)) {
-    
-    formula <- paste("Sample.Name", sep="~", names[i])
-    print(paste("[debug]           names: ", names[i], sep=""))
-    print(paste("[debug]           formu: ", formula, sep=""))
-    
-    x <- cast(sad, formula, length)
-    x <- x[-1]
-    
-    n <- as.vector(strsplit(names[i], "[*]")[[1]])
-    pst <- function(x) { y=x[1]; if (length(x)>1) for (i in 2:length(x)) {y <- paste(y, x[i], sep="___")}; y }
-    ns <- sort(apply(unique(sad[n]), 1, pst))
-    
-    names(x) <- ns
-    
-    x.full <- cbind(x.full, x)
-    l.from <- l.to + 1
-    l.to <- l.to + dim(x)[2]
-    x.list <- c(x.list, list(list(factor=names[i], from=l.from, to=l.to)))   
-  }
-  
-  x.full.unique <- as.matrix(unique(x.full))  
-  
-  list(traits=are.traits, random=random, fixed=fixed, x=x.full.unique, x.list=x.list)
-}
-
-# OLD - Calculate means and error for each factor - OLD VERSION
-fill.values.for.trait <- function(results, model, effects, trait) {
-  
-  print("[debug] fill.values.for.trait --------- OLD")
-  
-  x <- unique(model@X)
-  est <- x %*% model@fixef
-  
-  est.cov <- x %*% vcov(model) %*% t(x)
-  
-  for (j in 1:length(effects$x.list)) {
-    factor <- effects$x.list[[j]]$factor
-    from <- effects$x.list[[j]]$from
-    to <- effects$x.list[[j]]$to
-    
-    xf <- effects$x[,from:to]
-    
-    m <- solve(t(xf) %*% xf) %*% t(xf)
-    means <- m %*% est
-    rownames(means) <- colnames(effects$x)[from:to]
-    
-    means.var <- diag(m %*% est.cov %*% t(m))
-    
-    results[from:to, trait] <- means
-    results[from:to, paste("S.e.",trait, sep="")] <- sqrt(means.var)
-      
-  }  
-  results
-}
-
-# OLD - Fill in information about factor levels - OLD VERSION
-fill.factors <- function(results, effects) {
-  
-  print("[debug] fill.factors ---------- OLD")
-  
-  for (j in 1:length(effects$x.list)) {
-    
-    factors <- strsplit(effects$x.list[[j]]$factor, "[*]")[[1]]
-    from <- effects$x.list[[j]]$from
-    to <- effects$x.list[[j]]$to
-    
-    if (factors[1] != "const") {
-      for (i in from:to) {
-        col <- strsplit(colnames(effects$x)[i], "___")[[1]]
-        for (k in 1:length(col)) {
-          results[i,factors[k]] <- col[k]
-        }
-      }
-    }    
-  } 
-  
-  results
 }
 
 
