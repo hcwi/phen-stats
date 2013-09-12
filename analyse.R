@@ -219,6 +219,8 @@ get.sad <- function(sa, d) {
 run <- function() {
   
   print("[debug] run")
+  ENRICHED <<- "enriched"
+  REDUCED <<- "reduced"
   
   if (file.exists("C:/strawberry/perl/bin/perl.exe")) 
     PERL <<- "C:/strawberry/perl/bin/perl.exe"
@@ -249,13 +251,14 @@ run <- function() {
     result <<- get.models(sad, sad.names)
     means <- result$means
     models <- result$models
+    success <- result$success
     
     means <- change.names(means, sad.names)
     
     statFile <- save.results(sFile, aFile, sad, means, models)
     saPairs[i,5] <<- statFile
     # update isa-tab file to include sufficient data file
-    remFiles <- update.aFile(aFile, statFile)   
+    remFiles <- update.aFile(aFile, statFile, success == 0)   
     zip.files(remFiles)
     
   }
@@ -266,22 +269,24 @@ run <- function() {
 zip.files <- function(remFiles) {
   
   print("[debug] zip.files")
-  print(paste("        files to remove from archive3:", remFiles))
   
   dirs <- gsub(list.dirs(), pattern="./", rep="")
-  dirs <- grep(dirs, pattern="tmp[0-9]", val=T)
+  dirs <- grep(dirs, pattern=paste("(", ENRICHED, ")|(", REDUCED, ")", sep=""), val=T)
   
   files <- list.files()
   toSave <- setdiff(files, dirs)
   toSave <- setdiff(toSave, list.files(pattern="([.]zip)|([.]R)"))
   toSave <- setdiff(toSave, saPairs[,3])
   
-  toSave2 <- paste("tmp2", sep="/", list.files("tmp2"))
-  zip(zipfile="isarchive2.zip", files=c(toSave, toSave2), flags="a -ep1", zip="rar")
+  toSave2 <- paste(ENRICHED, sep="/", list.files(ENRICHED))
+  zip(zipfile=paste(ENRICHED, ".zip", sep=""), files=c(toSave, toSave2), flags="a -ep1", zip="rar")
   
-  toSave <- setdiff(toSave, remFiles)
-  toSave3 <- paste("tmp3", sep="/", list.files("tmp3"))
-  zip(zipfile="isarchive3.zip", files=c(toSave, toSave3), flags="a -ep1", zip="rar")
+  if (length(remFiles) > 0) {
+    print(paste("        files to remove from", REDUCED, ":", remFiles))
+    toSave <- setdiff(toSave, remFiles)
+    toSave3 <- paste(REDUCED, sep="/", list.files(REDUCED))
+    zip(zipfile=paste(REDUCED, ".zip", sep=""), files=c(toSave, toSave3), flags="a -ep1", zip="rar")
+  }
   
 }
 
@@ -360,7 +365,7 @@ save.results <- function (sFile, aFile, experiment, means, models) {
 } 
 
 # Update assay file to include sufficient statistics column
-update.aFile <- function(aFile, statFile) {
+update.aFile <- function(aFile, statFile, complete) {
   
   print("[debug] update.aFile")
   
@@ -371,28 +376,29 @@ update.aFile <- function(aFile, statFile) {
   
   a <- cbind(a, "Sufficient Data File"=statFile)
   
-  d2 = "tmp2"
-  dir.create(d2)
-  write.table(a, na="", row.names=F, sep="\t", file=paste(d2, aFile, sep="/"))
+  dir.create(ENRICHED)
+  write.table(a, na="", row.names=F, sep="\t", file=paste(ENRICHED, aFile, sep="/"))
   #write.table(a, na="", row.names=F, sep="\t", aFile)
   
-  u <- vector()
-  from=1
-  for (i in dataCols) {
-    c <- unique(a[i])
-    print(c)
-    to <- from + dim(c)[1]
-    u[from:(to-1)] <- as.matrix(c)
-    from <- to
+  remFiles = character(0)
+  if (complete) {
+    u <- vector()
+    from=1
+    for (i in dataCols) {
+      c <- unique(a[i])
+      print(c)
+      to <- from + dim(c)[1]
+      u[from:(to-1)] <- as.matrix(c)
+      from <- to
+    }
+    u <- unique(u)
+    
+    remFiles <- u[!is.na(u)]
+    a[dataCols] <- NA
+    
+    dir.create(REDUCED)
+    write.table(a, na="", row.names=F, sep="\t", file=paste(REDUCED, aFile, sep="/"))
   }
-  u <- unique(u)
-
-  remFiles <- u[!is.na(u)]
-  a[dataCols] <- NA
-  
-  d3 = "tmp3"
-  dir.create(d3)
-  write.table(a, na="", row.names=F, sep="\t", file=paste(d3, aFile, sep="/"))
   
   print(paste("Assay file", aFile, "updated to include sufficient statistics column"))
   
@@ -409,6 +415,7 @@ get.models <- function(sad, sad.names) {
   traits <<- get.traits(sad)
   results <<- prepare.results(sad)
   
+  success <- length(traits);
   models <- list()
   for (i in 1:length(traits)) {
     
@@ -431,11 +438,12 @@ get.models <- function(sad, sad.names) {
       results <- tmp$results
       info <- tmp$info    
       models <- c(models,list(info))
+      success <- success-1;
     }
     
   }
   
-  list(means=results, models=models)
+  list(means=results, models=models, success=success)
 }
 
 
