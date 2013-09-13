@@ -83,28 +83,32 @@ load.saFiles <- function(sName, aName) {
   print("[debug] load.saFiles")
   
   print(paste(sName, aName))
-  study <- read.table(sName, header=T, sep='\t')
+  s <- read.table(sName, header=T, sep='\t')
   s.names <- as.vector(names(read.table(sName, header=T, sep="\t", check.names=F)))
-  names(s.names) <- names(study)
+  names(s.names) <- names(s)
   print("[debug]     read.table study")
   
-  assay <- read.table(aName, header=T, sep='\t', fill=T)
+  a <- read.table(aName, header=T, sep='\t', fill=T)
   a.names <- as.vector(names(read.table(aName, header=T, sep='\t', fill=T, check.names=F)))
-  names(a.names) <- names(assay)
+  names(a.names) <- names(a)
   print("[debug]     read.table assay")
   
-  s <<- study
-  a <<- assay  
+  s <<- s
+  a <<- a
   sa.names <- c(s.names, a.names)
-  
-  
-  dupNames <- subset(names(study), match(names(study), names(assay)) > 0)
+    
+  dupNames <- subset(names(s), match(names(s), names(a)) > 0)
   print(paste("Common columns: ", toString(dupNames)))
   dupNames.nontrivial <- grep("(REF)|(Accession.Number)", dupNames, invert=T)
   dupNames <- dupNames[dupNames.nontrivial]
   warning("Parameter all=FALSE, not paired rows will be removed")
-  sa <- merge(study, assay, by=dupNames, all=F)
-  print(paste("Merged by", dupNames))
+  sa <- merge(s, a, by=dupNames, all=F)
+  print(paste("Merged by", paste(dupNames, collapse=", ")))
+  
+  if (dim(sa)[1] == 0) {
+    stop(paste("ERROR: Matching study file", sName, "and assay file", aName, "by columns", paste(dupNames, collapse=", "), 
+               "resulted in an empty set. Check for conflicting values."))
+  }
   
   list(sa, sa.names)
 }
@@ -211,6 +215,11 @@ get.sad <- function(sa, d) {
   sad <- merge(sa, d, by=dupNames, all=T)
   print(paste("Merged by: ", toString(dupNames)))
   
+  if (dim(sad)[1] == 0) {
+    stop(paste("ERROR: Matching study file", sName, "and assay file", aName, "with data file", d, "by columns", paste(dupNames, collapse=", "), 
+               "resulted in an empty set. Check for conflicting values."))
+  }
+  
   sad
 }
 
@@ -234,7 +243,7 @@ run <- function() {
     sFile <- saPairs[i,2]
     aFile <- saPairs[i,3]  
     tmp <- load.saFiles(sFile, aFile)
-    sa <- tmp[[1]]
+    sa <<- tmp[[1]]
     sa.names <- tmp[[2]]
     
     dFile <- find.dFile(sa)
@@ -744,8 +753,10 @@ run()
 #setwd("C:/Users/hcwi/Desktop/phen/src/test/resources/DataWUR")
 #setwd("C:/Users/hcwi/Desktop/phen/src/test/resources/Phenotyping2")
 #setwd("C:/Users/hcwi/Desktop/phen/src/test/resources/IPGPASData")
-# XXX setwd("C:/Users/hcwi/Desktop/phen/src/test/resources/DataIPK")
+# XXX setwd("C:/Users/hcwi/Desktop/phen/src/test/resources/DataIPK") XXX too big file, very time consuming calculations (30min) with no result
 #setwd("C:/Users/hcwi/Desktop/phen/src/test/resources/DataIPK2")
+# XXx setwd("C:/Users/hcwi/Desktop/phen/src/test/resources/DataINRA") XXX mistake in ISA-TAB structure, Sample column in both s/a with different values
+#setwd("C:/Users/hcwi/Desktop/phen/src/test/resources/DataINRA2")
 
 # calculate means for all obs~factor combinations
 #   what <- names(barley[sapply(barley, is.numeric)])
