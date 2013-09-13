@@ -345,7 +345,7 @@ change.names <- function (means, names) {
 }
 
 # Save results to files
-save.results <- function (sFile, aFile, experiment, means, models) {
+save.results <- function (sFile, aFile, experiment, means, models, elegant=TRUE) {
   
   print("[debug] save.results")
   
@@ -359,6 +359,24 @@ save.results <- function (sFile, aFile, experiment, means, models) {
   save(models, file=rFile)
   print(paste("R objects saved to file:", rFile))
   
+  if (elegant) {
+    drop <- grep(colnames(means), pattern="Formula")    
+    max <- length(colnames(means))
+    
+    rf <- "Factor.Value.Random."
+    emax <- length(colnames(experiment))
+    if (colnames(experiment)[emax] == rf) {
+      col <- grep(colnames(means), pattern=rf)
+      row <- grep(means[,col], pattern="[*]")
+      rmax <- dim(means)[1]
+      means <- rbind(means[1:(row-1),], means[(row+1):rmax,])
+      means <- cbind(Parameter=means[,1:(drop-1)], means[,(drop+1):(col-1)], means[,(col+1):max])
+    }
+    else {
+      means <- cbind(Parameter=means[,1:(drop-1)], means[,(drop+1):max])
+    }
+  }
+    
   statFile <- paste(sFile2, aFile2, "stat.txt", sep="_")
   write.table(means, file=statFile, sep="\t", na="", row.names=F)
   print(paste("Sufficient statistics saved to file: ", statFile))
