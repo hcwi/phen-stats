@@ -757,6 +757,7 @@ run()
 #setwd("C:/Users/hcwi/Desktop/phen/src/test/resources/DataIPK2")
 # XXx setwd("C:/Users/hcwi/Desktop/phen/src/test/resources/DataINRA") XXX mistake in ISA-TAB structure, Sample column in both s/a with different values
 #setwd("C:/Users/hcwi/Desktop/phen/src/test/resources/DataINRA2")
+#setwd("C:/Users/hcwi/Desktop/phen/src/test/resources/Keygene2")
 
 # calculate means for all obs~factor combinations
 #   what <- names(barley[sapply(barley, is.numeric)])
