@@ -219,8 +219,10 @@ get.sad <- function(sa, d) {
 run <- function() {
   
   print("[debug] run")
-  ENRICHED <<- "enriched"
-  REDUCED <<- "reduced"
+  r <- regexpr(pattern="/[^/]*$", getwd())
+  dir <- substr(getwd(), r[1]+1, r[1]+attr(r, "match.length"))
+  ENRICHED <<- paste(dir, "enriched", sep="_")
+  REDUCED <<- paste(dir, "reduced", sep="_")
   
   if (file.exists("C:/strawberry/perl/bin/perl.exe")) 
     PERL <<- "C:/strawberry/perl/bin/perl.exe"
@@ -710,11 +712,11 @@ get.random <- function(sad) {
 # Things to do before running in Java
 
 # remove global variables (<<-)
-# change assay file instead of adding "*2.txt"
-
 # uncomment:
-# args <- commandArgs(TRUE)
-# setwd(args[1])
+args <- commandArgs(TRUE)
+if (length(args) > 0) {
+  setwd(args[1])
+}
 
 options(stringsAsFactors=FALSE)
 run()
