@@ -151,7 +151,7 @@ load.xls <- function(file) {
   
   print("[debug] load.xls")
   
-  if(!require("gdata")) {install.packages("gdata")}
+  if(!require("gdata")) {install.packages("gdata", repos='http://cran.us.r-project.org')}
   library(gdata)
   d <- read.xls(file, perl=PERL)
   d2 <- read.xls(file, perl=PERL, check.names=F)
@@ -286,7 +286,7 @@ zip.files <- function(remFiles) {
   
   files <- list.files()
   toSave <- setdiff(files, dirs)
-  toSave <- setdiff(toSave, list.files(pattern="([.]zip)|([.]R)"))
+  toSave <- setdiff(toSave, list.files(pattern="([.]zip)|([.]R)|~.*"))
   toSave <- setdiff(toSave, saPairs[,3])
   
   toSave2 <- paste(ENRICHED, sep="/", list.files(ENRICHED))
@@ -683,13 +683,13 @@ prepare.matrices <- function(sad, fixed) {
 prepare.libs <- function() {
   
   if(!require("lme4")) {
-    install.packages("lme4")
+    install.packages("lme4", repos='http://cran.us.r-project.org')
+    library(lme4)
   }
-  library(lme4)
   if(!require("reshape")) {
-    install.packages("reshape")
+    install.packages("reshape", repos='http://cran.us.r-project.org')
+    library(reshape)
   }
-  library(reshape)
 }
 
 # Get traits
@@ -766,7 +766,7 @@ run()
 # 
 
 #P-VALS
-#if(!require("languageR")) {install.packages("languageR")}
+#if(!require("languageR")) {install.packages("languageR", repos='http://cran.us.r-project.org')}
 #library(languageR)
 #m1.p <- pvals.fnc(m1)
 
