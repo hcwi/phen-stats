@@ -122,7 +122,7 @@ load.dFile <- function(dFile) {
   f <- paste(getwd(),dFile, sep="/")
   
   d <- tryCatch({
-    if (grep("xls", dFile)) {
+    if (length(grep("xls", dFile)) > 0) {
       if (exists("PERL"))
         load.xls(f)
       else
@@ -130,7 +130,8 @@ load.dFile <- function(dFile) {
     }
     else {
       print(paste("Loading", dFile, "with read.table"))
-      read.table(dFile, header=T, sep="\t")
+      load.txt(f)
+      #read.table(f, header=T, sep="\t")
     }
   },    
                 error = function(e) {
@@ -161,14 +162,13 @@ load.xls <- function(file) {
 }
 
 # Load data from txt file
-load.txt <- function(file) {
+load.txt <- function(dFile) {
   
   print("[debug] load.txt")
   
-  dataName2 <- gsub("([.]xls)|([.]xlsx)", ".txt", dataName)
-  print(paste("Trying", dataName2,"with read.table"))
-  d <- read.table(dataName2, header=T, sep="\t")
-  d2 <- read.table(dataName2, header=T, sep="\t", check.names=F)    
+  print(paste("Loading", dFile, "with read.table"))
+  d <- read.table(dFile, header=T, sep="\t")
+  d2 <- read.table(dFile, header=T, sep="\t", check.names=F)    
   d.names <- as.vector(names(d2))
   names(d.names) <- names(d)
   list(d, d.names)
@@ -290,13 +290,23 @@ zip.files <- function(remFiles) {
   toSave <- setdiff(toSave, saPairs[,3])
   
   toSave2 <- paste(ENRICHED, sep="/", list.files(ENRICHED))
-  zip(zipfile=paste(ENRICHED, ".zip", sep=""), files=c(toSave, toSave2), flags="a -ep1", zip="rar")
+  if (Sys.info()["sysname"] == "Windows") {
+    zip(zipfile=paste(ENRICHED, ".zip", sep=""), files=c(toSave, toSave2), flags="a -ep1", zip="rar")
+  }
+  else {
+    zip(zipfile=ENRICHED, files=c(toSave, toSave2), flags="-rj", zip="zip")
+  }
   
   if (length(remFiles) > 0) {
     print(paste("        files to remove from", REDUCED, ":", remFiles))
     toSave <- setdiff(toSave, remFiles)
     toSave3 <- paste(REDUCED, sep="/", list.files(REDUCED))
-    zip(zipfile=paste(REDUCED, ".zip", sep=""), files=c(toSave, toSave3), flags="a -ep1", zip="rar")
+    if (Sys.info()["sysname"] == "Windows") {
+      zip(zipfile=paste(REDUCED, ".zip", sep=""), files=c(toSave, toSave3), flags="a -ep1", zip="rar")
+    } 
+    else {
+      zip(zipfile=REDUCED, files=c(toSave, toSave3), flags="-rj", zip="zip")
+    }
   }
   
 }
@@ -615,8 +625,8 @@ fill.means.for.fixed <- function(sad, results, model, fixed, trait) {
   fix <- tmp$fix
   xu <- tmp$xu
   
-  x <- unique(model@X)
-  est <- x %*% model@fixef
+  x <- unique(getME(model, "X"))
+  est <- x %*% fixef(model)
   est.cov <- x %*% vcov(model) %*% t(x)
   
   for (i in 1:dim(fix)[1]) {
@@ -748,6 +758,7 @@ if (length(args) > 0) {
 options(stringsAsFactors=FALSE)
 run()
 
+#setwd("C:/Users/hcwi/Desktop/phenotypingTXT")
 #setwd("C:/Users/hcwi/Desktop/phen-stats/isatab")
 #setwd("C:/Users/hcwi/Desktop/phen-stats/isatab_missing")
 #setwd("C:/Users/hcwi/Desktop/phen/src/test/resources/DataWUR")
