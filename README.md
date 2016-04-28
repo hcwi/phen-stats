@@ -1,4 +1,4 @@
 phen-stats
 ==========
 
-R processing of ISA-TAB
+R processing of ISA-Tab (outdated)
